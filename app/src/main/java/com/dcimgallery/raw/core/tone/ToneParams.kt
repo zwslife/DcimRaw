@@ -15,10 +15,14 @@ data class HslAdjust(
     val isNeutral: Boolean get() = hue == 0f && sat == 0f && lum == 0f
 }
 
+/** 色彩分级：色相 0..1 为一周，饱和度 0..1，明度 -1..1。 */
+data class ColorGrade(val hue: Float = 0f, val saturation: Float = 0f, val luminance: Float = 0f) {
+    val isNeutral: Boolean get() = saturation == 0f && luminance == 0f
+}
+
 /**
  * Lr 风格调色参数（全量版）。
- * 全部以 0 为中性点；拖动预览与导出共用同一份渲染数据（toRenderData），
- * 由 native 渲染管线逐像素应用：矩阵 → 亮度曲线 → HSL。
+ * 全局与蒙版共用参数、保存格式和 native 管线；辅助项使用各自的默认值。
  */
 data class ToneParams(
     /** 曝光（EV 档，-2..+2） */
@@ -41,11 +45,36 @@ data class ToneParams(
     val blacks: Float = 0f,
     /** HSL 八分区：红/橙/黄/绿/青/蓝/紫/品红 */
     val hsl: List<HslAdjust> = List(HSL_COUNT) { HslAdjust() },
+    val vibrance: Float = 0f,
+    val texture: Float = 0f,
+    val clarity: Float = 0f,
+    val dehaze: Float = 0f,
+    val vignette: Float = 0f,
+    val vignetteMidpoint: Float = 0.5f,
+    val vignetteFeather: Float = 0.5f,
+    val vignetteRoundness: Float = 0f,
+    val vignetteHighlights: Float = 0f,
+    val grain: Float = 0f,
+    val grainSize: Float = 0.25f,
+    val grainRoughness: Float = 0.5f,
+    val blackWhite: Boolean = false,
+    val bwMix: List<Float> = List(HSL_COUNT) { 0f },
+    val sharpening: Float = 0f,
+    /** 原图像素半径，预览按缩放比例换算。 */
+    val sharpeningRadius: Float = 1f,
+    val sharpeningDetail: Float = 0.25f,
+    val sharpeningMasking: Float = 0f,
+    /** 阴影、中间调、高光、全局。 */
+    val grading: List<ColorGrade> = List(4) { ColorGrade() },
+    val gradingBalance: Float = 0f,
+    val gradingBlending: Float = 0.5f,
 ) {
     val isNeutral: Boolean
         get() = exposure == 0f && contrast == 0f && temperature == 0f &&
             tint == 0f && saturation == 0f && highlights == 0f && shadows == 0f &&
-            whites == 0f && blacks == 0f && hsl.all { it.isNeutral }
+            whites == 0f && blacks == 0f && hsl.all { it.isNeutral } &&
+            vibrance == 0f && texture == 0f && clarity == 0f && dehaze == 0f &&
+            vignette == 0f && grain == 0f && !blackWhite && sharpening == 0f && grading.all { it.isNeutral }
 
     /** 基础五项的 4x5 颜色矩阵（与预览 GPU/导出共用） */
     fun toMatrix(): FloatArray {
@@ -54,7 +83,7 @@ data class ToneParams(
         val rs = 1f + temperature * 0.15f
         val gs = 1f + tint * 0.10f
         val bs = 1f - temperature * 0.15f
-        val s = 1f + saturation
+        val s = if (blackWhite) 1f else 1f + saturation
         val wr = 0.299f
         val wg = 0.587f
         val wb = 0.114f
@@ -103,12 +132,44 @@ data class ToneParams(
         val matrix: FloatArray,
         val lut: FloatArray,
         val hsl: FloatArray,
+        val effects: FloatArray,
     )
 
-    fun toRenderData(): RenderData = RenderData(toMatrix(), toneLut(), hslArray())
+    /** 与 tone_engine.h 的 EffectIndex 一一对应，预览/定稿/蒙版使用同一协议。 */
+    fun effectsArray(): FloatArray = FloatArray(EFFECT_COUNT).also { out ->
+        floatArrayOf(vibrance, texture, clarity, dehaze, vignette, vignetteMidpoint,
+            vignetteFeather, vignetteRoundness, vignetteHighlights, grain, grainSize,
+            grainRoughness, if (blackWhite) 1f else 0f, sharpening, sharpeningRadius,
+            sharpeningDetail, sharpeningMasking, gradingBalance, gradingBlending).copyInto(out)
+        repeat(4) { i ->
+            val grade = grading.getOrElse(i) { ColorGrade() }
+            out[19 + i * 3] = grade.hue
+            out[20 + i * 3] = grade.saturation
+            out[21 + i * 3] = grade.luminance
+        }
+        repeat(HSL_COUNT) { out[31 + it] = bwMix.getOrElse(it) { 0f } }
+    }
+
+    fun toRenderData(): RenderData = RenderData(toMatrix(), toneLut(), hslArray(), effectsArray())
+
+    /** 老照片缺失的项采用默认值；防止损坏的存档把 NaN 或越界值传入 native。 */
+    fun withEffects(values: FloatArray): ToneParams {
+        val defaults = ToneParams().effectsArray()
+        fun v(i: Int, min: Float = 0f, max: Float = 1f): Float =
+            (values.getOrNull(i)?.takeIf { it.isFinite() } ?: defaults[i]).coerceIn(min, max)
+        return copy(vibrance = v(0, -1f), texture = v(1, -1f), clarity = v(2, -1f),
+            dehaze = v(3, -1f), vignette = v(4, -1f), vignetteMidpoint = v(5),
+            vignetteFeather = v(6), vignetteRoundness = v(7, -1f), vignetteHighlights = v(8),
+            grain = v(9), grainSize = v(10), grainRoughness = v(11), blackWhite = v(12) >= 0.5f,
+            sharpening = v(13), sharpeningRadius = v(14, 0.5f, 3f), sharpeningDetail = v(15),
+            sharpeningMasking = v(16), gradingBalance = v(17, -1f), gradingBlending = v(18),
+            grading = List(4) { ColorGrade(v(19 + it * 3), v(20 + it * 3), v(21 + it * 3, -1f)) },
+            bwMix = List(HSL_COUNT) { v(31 + it, -1f) })
+    }
 
     companion object {
         const val HSL_COUNT = 8
+        const val EFFECT_COUNT = 39
 
         /** 八分区中心色相（红橙黄绿青蓝紫品红） */
         val HSL_CENTERS = floatArrayOf(0f, 30f, 60f, 120f, 180f, 240f, 270f, 315f)

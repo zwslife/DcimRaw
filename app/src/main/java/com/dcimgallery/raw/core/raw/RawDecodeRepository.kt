@@ -74,7 +74,7 @@ class RawDecodeRepository(private val app: GalleryApp) {
                 } else {
                     val data = tone.toRenderData()
                     val dst = Bitmap.createBitmap(bitmap.width, bitmap.height, Bitmap.Config.ARGB_8888)
-                    if (!RawDecoder.renderToneFull(bitmap, data.matrix, data.lut, data.hsl, dst) ||
+                    if (!RawDecoder.renderToneFull(bitmap, data.matrix, data.lut, data.hsl, data.effects, dst) ||
                         !MaskRenderCache().apply(dst, masks)) {
                         dst.recycle()
                         return@withContext "调色渲染失败"

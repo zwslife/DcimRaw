@@ -11,7 +11,7 @@ class MaskRenderCache {
     private var packedKeys = emptyList<Key>()
     private var packedCoverage = ByteArray(0)
 
-    fun apply(bitmap: Bitmap, layers: List<MaskLayer>): Boolean {
+    fun apply(bitmap: Bitmap, layers: List<MaskLayer>, previewHandle: Long = 0L): Boolean {
         val active = layers.filter { it.enabled && !it.tone.isNeutral && (it.components.isNotEmpty() || it.inverted) }
         if (active.isEmpty()) return true
         val scale = (1024f / maxOf(bitmap.width, bitmap.height)).coerceAtMost(1f)
@@ -30,13 +30,15 @@ class MaskRenderCache {
         val matrices = FloatArray(20 * active.size)
         val luts = FloatArray(256 * active.size)
         val hsls = FloatArray(24 * active.size)
+        val effects = FloatArray(ToneParams.EFFECT_COUNT * active.size)
         active.forEachIndexed { i, layer ->
             val data = layer.tone.toRenderData()
             data.matrix.copyInto(matrices, i * 20)
             data.lut.copyInto(luts, i * 256)
             data.hsl.copyInto(hsls, i * 24)
+            data.effects.copyInto(effects, i * ToneParams.EFFECT_COUNT)
         }
-        return RawDecoder.applyMasks(bitmap, matrices, luts, hsls, packedCoverage, w, h)
+        return RawDecoder.applyMasks(bitmap, matrices, luts, hsls, effects, packedCoverage, w, h, previewHandle)
     }
 
     fun clear() {

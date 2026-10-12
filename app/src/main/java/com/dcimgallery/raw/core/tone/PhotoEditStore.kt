@@ -43,7 +43,7 @@ class PhotoEditStore(context: Context) {
 
     @Synchronized
     fun save(uri: String, edits: PhotoEdits) {
-        val root = JSONObject().put("version", 1).put("tone", toneJson(edits.tone))
+        val root = JSONObject().put("version", 2).put("tone", toneJson(edits.tone))
         root.put("masks", JSONArray().apply {
             edits.masks.forEach { mask -> put(JSONObject().put("id", mask.id).put("name", mask.name)
                 .put("inverted", mask.inverted).put("enabled", mask.enabled).put("tone", toneJson(mask.tone))
@@ -77,16 +77,21 @@ class PhotoEditStore(context: Context) {
         put("saturation", t.saturation.toDouble()); put("highlights", t.highlights.toDouble())
         put("shadows", t.shadows.toDouble()); put("whites", t.whites.toDouble()); put("blacks", t.blacks.toDouble())
         put("hsl", JSONArray().apply { t.hsl.forEach { put(JSONArray().put(it.hue.toDouble()).put(it.sat.toDouble()).put(it.lum.toDouble())) } })
+        put("effects", JSONArray().apply { t.effectsArray().forEach { put(it.toDouble()) } })
     }
 
     private fun readTone(t: JSONObject): ToneParams {
         fun f(key: String) = t.optDouble(key, 0.0).toFloat()
         val hsl = t.optJSONArray("hsl")
-        return ToneParams(f("exposure"), f("contrast"), f("temperature"), f("tint"), f("saturation"),
+        val base = ToneParams(f("exposure"), f("contrast"), f("temperature"), f("tint"), f("saturation"),
             f("highlights"), f("shadows"), f("whites"), f("blacks"), List(ToneParams.HSL_COUNT) { i ->
                 val a = hsl?.optJSONArray(i)
                 HslAdjust(a?.optDouble(0, 0.0)?.toFloat() ?: 0f,
                     a?.optDouble(1, 0.0)?.toFloat() ?: 0f, a?.optDouble(2, 0.0)?.toFloat() ?: 0f)
             })
+        return base.withEffects(t.optJSONArray("effects")?.let { values ->
+            val defaults = ToneParams().effectsArray()
+            FloatArray(ToneParams.EFFECT_COUNT) { values.optDouble(it, defaults[it].toDouble()).toFloat() }
+        } ?: ToneParams().effectsArray())
     }
 }

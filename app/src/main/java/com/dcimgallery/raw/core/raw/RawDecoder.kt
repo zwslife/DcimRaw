@@ -38,6 +38,7 @@ object RawDecoder {
         matrix: FloatArray,
         lut: FloatArray,
         hsl: FloatArray,
+        effects: FloatArray,
         out: Bitmap,
     ): Boolean
 
@@ -47,12 +48,13 @@ object RawDecoder {
         matrix: FloatArray,
         lut: FloatArray,
         hsl: FloatArray,
+        effects: FloatArray,
         dst: Bitmap,
     ): Boolean
 
     /** 对尚未发布的调色结果应用蒙版，覆盖率会按像素中心双线性采样。 */
     external fun applyMasks(
-        bitmap: Bitmap, matrices: FloatArray, luts: FloatArray, hsls: FloatArray,
-        coverage: ByteArray, maskWidth: Int, maskHeight: Int,
+        bitmap: Bitmap, matrices: FloatArray, luts: FloatArray, hsls: FloatArray, effects: FloatArray,
+        coverage: ByteArray, maskWidth: Int, maskHeight: Int, previewHandle: Long,
     ): Boolean
 }

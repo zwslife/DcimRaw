@@ -296,8 +296,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val data = params.toRenderData()
         // 已发布的 Bitmap 不再修改，确保 StateFlow 发出新帧且 Compose 重绘。
         val out = Bitmap.createBitmap(previewWidth, previewHeight, Bitmap.Config.ARGB_8888)
-        if (RawDecoder.renderTonePreview(handle, data.matrix, data.lut, data.hsl, out) &&
-            previewMasks.apply(out, _masks.value[uri].orEmpty())) {
+        if (RawDecoder.renderTonePreview(handle, data.matrix, data.lut, data.hsl, data.effects, out) &&
+            previewMasks.apply(out, _masks.value[uri].orEmpty(), handle)) {
             // 连续拖动也发布已完成帧，下一次任务读取最新参数，避免一直等停手。
             tonePreview.value = uri to out
         } else {
@@ -333,7 +333,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                         try {
                             // 全尺寸补帧让出 CPU；拨盘实时预览保持正常优先级。
                             Process.setThreadPriority(Process.THREAD_PRIORITY_BACKGROUND)
-                            RawDecoder.renderToneFull(src, data.matrix, data.lut, data.hsl, dst) &&
+                            RawDecoder.renderToneFull(src, data.matrix, data.lut, data.hsl, data.effects, dst) &&
                                 fullMasks.apply(dst, maskLayers)
                         } finally {
                             Process.setThreadPriority(previousPriority)

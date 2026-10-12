@@ -41,6 +41,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.dp
 import com.dcimgallery.raw.core.tone.HslAdjust
+import com.dcimgallery.raw.core.tone.ColorGrade
 import com.dcimgallery.raw.core.tone.ToneParams
 import java.util.Locale
 import kotlin.math.roundToInt
@@ -48,7 +49,7 @@ import kotlin.math.roundToInt
 /**
  * Lr 风格调色面板（拨盘式紧凑坞）。
  * 参考系统相册编辑交互：分区标签 + 参数卡片 + 单参数拨盘 + HSL 色点，
- * 控制区只占底部约四分之一，图片始终完整可见。
+ * 分组横向滚动，保留固定中央指针与白色底部控制区。
  */
 @Composable
 fun TonePanel(
@@ -60,11 +61,12 @@ fun TonePanel(
     compactHeader: Boolean = false,
     onDraggingChange: (Boolean) -> Unit = {},
 ) {
-    var section by rememberSaveable { mutableIntStateOf(0) } // 0曝光 1色彩 2HSL
+    var section by rememberSaveable { mutableIntStateOf(0) }
     var hslIndex by rememberSaveable { mutableIntStateOf(0) }
+    var gradeIndex by rememberSaveable { mutableIntStateOf(0) }
     var activeChip by rememberSaveable { mutableStateOf("曝光") }
 
-    val chips = rememberChips(section, hslIndex)
+    val chips = rememberChips(section, hslIndex, gradeIndex, params.blackWhite)
     val active = chips.firstOrNull { it.id == activeChip } ?: chips.first()
     val accent = Color(0xFF237A46)
 
@@ -79,44 +81,56 @@ fun TonePanel(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier.padding(horizontal = 12.dp, vertical = 2.dp),
         ) {
-            listOf("曝光", "色彩", "HSL").forEachIndexed { index, name ->
-                TextButton(
-                    onClick = {
-                        section = index
-                        activeChip = rememberChips(index, hslIndex).first().id
-                    },
-                ) {
-                    Text(
-                        text = name,
-                        color = if (section == index) accent else Color(0xFF62656B),
-                        style = MaterialTheme.typography.bodyMedium,
-                    )
+            Row(Modifier.weight(1f).horizontalScroll(rememberScrollState())) {
+                listOf("曝光", "色彩", if (params.blackWhite) "黑白混色" else "HSL", "效果", "分级", "细节").forEachIndexed { index, name ->
+                    TextButton(
+                        onClick = {
+                            section = index
+                            activeChip = rememberChips(index, hslIndex, gradeIndex, params.blackWhite).first().id
+                        },
+                    ) {
+                        Text(
+                            text = name,
+                            color = if (section == index) accent else Color(0xFF62656B),
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                    }
                 }
             }
-            Spacer(Modifier.weight(1f))
-            if (!compactHeader) Text(
-                text = photoName,
-                style = MaterialTheme.typography.bodySmall,
-                color = Color(0xFF6E6E73),
-                maxLines = 1,
-            )
             TextButton(onClick = onReset) { Text("复位") }
             if (!compactHeader) TextButton(onClick = onClose) { Text("完成", color = accent) }
+        }
+
+        if (section == 1) {
+            TextButton(onClick = { onParamsChange(params.copy(blackWhite = !params.blackWhite)) },
+                modifier = Modifier.align(Alignment.CenterHorizontally)) {
+                Text(if (params.blackWhite) "黑白：开 · 点击切回彩色" else "黑白：关 · 点击转为黑白", color = accent)
+            }
+        }
+        if (section == 4) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                listOf("阴影", "中间调", "高光", "全局").forEachIndexed { i, name ->
+                    TextButton(onClick = { gradeIndex = i; activeChip = "grade_hue" }) {
+                        Text(name, color = if (gradeIndex == i) accent else Color(0xFF62656B))
+                    }
+                }
+            }
         }
 
         // 当前值
         Text(
             text = "${active.label}  ${active.format(active.get(params))}",
             style = MaterialTheme.typography.titleSmall,
-            color = if (active.get(params) != 0f) accent else Color(0xFF202124),
+            color = if (active.get(params) != active.default) accent else Color(0xFF202124),
             modifier = Modifier.align(Alignment.CenterHorizontally),
         )
 
         // 拨盘
-        key(active.id, hslIndex) {
+        key(active.id, hslIndex, gradeIndex) {
             DialSlider(
                 value = active.get(params),
                 range = active.range,
+                defaultValue = active.default,
                 accent = accent,
                 onChange = { onParamsChange(active.set(params, it)) },
                 onDraggingChange = onDraggingChange,
@@ -144,7 +158,7 @@ fun TonePanel(
                             )
                             .clickable {
                                 hslIndex = index
-                                activeChip = rememberChips(section, index).first().id
+                                activeChip = rememberChips(section, index, gradeIndex, params.blackWhite).first().id
                             },
                     )
                 }
@@ -183,7 +197,7 @@ fun TonePanel(
                     Text(
                         text = chip.format(chip.get(params)),
                         style = MaterialTheme.typography.labelSmall,
-                        color = if (chip.get(params) != 0f) Color(0xFF202124) else Color(0xFF6E6E73),
+                        color = if (chip.get(params) != chip.default) Color(0xFF202124) else Color(0xFF6E6E73),
                     )
                 }
             }
@@ -200,9 +214,10 @@ private data class ChipDef(
     val format: (Float) -> String,
     val get: (ToneParams) -> Float,
     val set: (ToneParams, Float) -> ToneParams,
+    val default: Float = 0f,
 )
 
-private fun rememberChips(section: Int, hslIndex: Int): List<ChipDef> {
+private fun rememberChips(section: Int, hslIndex: Int, gradeIndex: Int, blackWhite: Boolean): List<ChipDef> {
     return when (section) {
         0 -> listOf(
             ChipDef("曝光", "曝光", -2f..2f, ::signed, { it.exposure }, { p, v -> p.copy(exposure = v) }),
@@ -216,10 +231,49 @@ private fun rememberChips(section: Int, hslIndex: Int): List<ChipDef> {
             ChipDef("色温", "色温", -1f..1f, ::pct, { it.temperature }, { p, v -> p.copy(temperature = v) }),
             ChipDef("色调", "色调", -1f..1f, ::pct, { it.tint }, { p, v -> p.copy(tint = v) }),
             ChipDef("饱和度", "饱和度", -1f..1f, ::pct, { it.saturation }, { p, v -> p.copy(saturation = v) }),
+            ChipDef("自然饱和度", "自然饱和度", -1f..1f, ::pct, { it.vibrance }, { p, v -> p.copy(vibrance = v) }),
+        )
+        3 -> listOf(
+            ChipDef("纹理", "纹理", -1f..1f, ::pct, { it.texture }, { p, v -> p.copy(texture = v) }),
+            ChipDef("清晰度", "清晰度", -1f..1f, ::pct, { it.clarity }, { p, v -> p.copy(clarity = v) }),
+            ChipDef("去朦胧", "去朦胧", -1f..1f, ::pct, { it.dehaze }, { p, v -> p.copy(dehaze = v) }),
+            ChipDef("暗角", "暗角", -1f..1f, ::pct, { it.vignette }, { p, v -> p.copy(vignette = v) }),
+            ChipDef("暗角中点", "暗角·中点", 0f..1f, ::unsignedPct, { it.vignetteMidpoint }, { p, v -> p.copy(vignetteMidpoint = v) }, 0.5f),
+            ChipDef("暗角羽化", "暗角·羽化", 0f..1f, ::unsignedPct, { it.vignetteFeather }, { p, v -> p.copy(vignetteFeather = v) }, 0.5f),
+            ChipDef("暗角圆度", "暗角·圆度", -1f..1f, ::pct, { it.vignetteRoundness }, { p, v -> p.copy(vignetteRoundness = v) }),
+            ChipDef("暗角高光", "暗角·高光保护", 0f..1f, ::unsignedPct, { it.vignetteHighlights }, { p, v -> p.copy(vignetteHighlights = v) }),
+            ChipDef("颗粒", "颗粒", 0f..1f, ::unsignedPct, { it.grain }, { p, v -> p.copy(grain = v) }),
+            ChipDef("颗粒大小", "颗粒·大小", 0f..1f, ::unsignedPct, { it.grainSize }, { p, v -> p.copy(grainSize = v) }, 0.25f),
+            ChipDef("颗粒粗糙度", "颗粒·粗糙度", 0f..1f, ::unsignedPct, { it.grainRoughness }, { p, v -> p.copy(grainRoughness = v) }, 0.5f),
+        )
+        4 -> {
+            fun get(p: ToneParams) = p.grading.getOrElse(gradeIndex) { ColorGrade() }
+            fun update(p: ToneParams, grade: ColorGrade) = p.copy(grading = List(4) {
+                if (it == gradeIndex) grade else p.grading.getOrElse(it) { ColorGrade() }
+            })
+            listOf(
+                ChipDef("grade_hue", "色相", 0f..1f, { "${(it * 360).roundToInt()}°" }, { get(it).hue },
+                    { p, v -> update(p, get(p).copy(hue = v)) }),
+                ChipDef("grade_sat", "饱和度", 0f..1f, ::unsignedPct, { get(it).saturation },
+                    { p, v -> update(p, get(p).copy(saturation = v)) }),
+                ChipDef("grade_lum", "明度", -1f..1f, ::pct, { get(it).luminance },
+                    { p, v -> update(p, get(p).copy(luminance = v)) }),
+                ChipDef("grade_balance", "平衡", -1f..1f, ::pct, { it.gradingBalance }, { p, v -> p.copy(gradingBalance = v) }),
+                ChipDef("grade_blending", "混合", 0f..1f, ::unsignedPct, { it.gradingBlending }, { p, v -> p.copy(gradingBlending = v) }, 0.5f),
+            )
+        }
+        5 -> listOf(
+            ChipDef("锐化", "锐化·强度", 0f..1f, ::unsignedPct, { it.sharpening }, { p, v -> p.copy(sharpening = v) }),
+            ChipDef("锐化半径", "锐化·半径", 0.5f..3f, { String.format(Locale.US, "%.1f px", it) }, { it.sharpeningRadius }, { p, v -> p.copy(sharpeningRadius = v) }, 1f),
+            ChipDef("锐化细节", "锐化·细节", 0f..1f, ::unsignedPct, { it.sharpeningDetail }, { p, v -> p.copy(sharpeningDetail = v) }, 0.25f),
+            ChipDef("锐化蒙版", "锐化·边缘蒙版", 0f..1f, ::unsignedPct, { it.sharpeningMasking }, { p, v -> p.copy(sharpeningMasking = v) }),
         )
         else -> {
             val name = ToneParams.HSL_NAMES[hslIndex]
-            listOf(
+            if (blackWhite) listOf(ChipDef("bw_mix", "黑白明度·$name", -1f..1f, ::pct,
+                { it.bwMix.getOrElse(hslIndex) { 0f } }, { p, v -> p.copy(bwMix = List(ToneParams.HSL_COUNT) {
+                    if (it == hslIndex) v else p.bwMix.getOrElse(it) { 0f }
+                }) })) else listOf(
                 ChipDef("hsl_h", "色相·$name", -1f..1f, ::pct,
                     { it.hsl.getOrElse(hslIndex) { HslAdjust() }.hue },
                     { p, v -> p.copy(hsl = p.hsl.replaced(hslIndex, p.hsl.getOrElse(hslIndex) { HslAdjust() }.copy(hue = v))) }),
@@ -243,6 +297,7 @@ private fun List<HslAdjust>.replaced(index: Int, value: HslAdjust): List<HslAdju
 private fun DialSlider(
     value: Float,
     range: ClosedFloatingPointRange<Float>,
+    defaultValue: Float,
     accent: Color,
     onChange: (Float) -> Unit,
     onDraggingChange: (Boolean) -> Unit,
@@ -276,7 +331,7 @@ private fun DialSlider(
                     }
                 }
                 .pointerInput(range) {
-                    detectTapGestures(onDoubleTap = { currentOnChange(0f) })
+                    detectTapGestures(onDoubleTap = { currentOnChange(defaultValue) })
                 },
         ) {
             val midY = size.height * 0.55f
@@ -310,3 +365,5 @@ private fun signed(v: Float): String =
 
 private fun pct(v: Float): String =
     (v * 100).roundToInt().let { if (it > 0) "+$it" else "$it" }
+
+private fun unsignedPct(v: Float): String = (v * 100).roundToInt().toString()
