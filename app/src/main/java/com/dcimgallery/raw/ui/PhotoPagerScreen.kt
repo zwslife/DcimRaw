@@ -67,6 +67,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.PointerId
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
@@ -209,20 +210,20 @@ fun PhotoPagerScreen(
                         .fillMaxSize()
                         .padding(if (showMasks) PaddingValues(bottom = maskPanelDp) else PaddingValues(0.dp))
                         .onSizeChanged { if (isCurrent) gestureState.viewSize = it }
-                        // 关键修复：只有双指捏合或已缩放时才接管手势（手动跟踪），
-                        // 单指未缩放不消费事件，横向滑动自然还给 Pager
+                        // 图片与蒙版在同一个 graphicsLayer 内缩放；由父层在 Initial pass
+                        // 统一识别双指手势，单指交给蒙版绘制或未缩放时的 Pager。
                         .pointerInput(showMasks) {
-                            if (showMasks) return@pointerInput
                             awaitEachGesture {
-                                awaitFirstDown(requireUnconsumed = false)
-                                val first = awaitPointerEvent()
-                                if (first.changes.count { it.pressed } < 2 && !gestureState.isZoomed) {
+                                awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                                val first = awaitPointerEvent(PointerEventPass.Initial)
+                                if (first.changes.none { it.pressed }) return@awaitEachGesture
+                                if (!showMasks && first.changes.count { it.pressed } < 2 && !gestureState.isZoomed) {
                                     return@awaitEachGesture
                                 }
                                 val prevPositions = HashMap<PointerId, Offset>()
                                 first.changes.forEach { prevPositions[it.id] = it.position }
                                 while (true) {
-                                    val event = awaitPointerEvent()
+                                    val event = awaitPointerEvent(PointerEventPass.Initial)
                                     val pressed = event.changes.filter { it.pressed }
                                     if (pressed.isEmpty()) break
                                     val positions = pressed.map { it.position }
@@ -246,7 +247,8 @@ fun PhotoPagerScreen(
                                     } else {
                                         Offset.Zero
                                     }
-                                    if (zoom != 1f || pan != Offset.Zero) {
+                                    if ((pressed.size >= 2 || !showMasks && gestureState.isZoomed) &&
+                                        (zoom != 1f || pan != Offset.Zero)) {
                                         gestureState.onTransform(centroid, pan, zoom)
                                         pressed.forEach { it.consume() }
                                     }
@@ -310,10 +312,6 @@ fun PhotoPagerScreen(
                             opacity = maskOpacity, showOverlay = maskOverlay,
                             imageWidth = decoded.width, imageHeight = decoded.height,
                             editable = !maskAdjusting,
-                            onTransform = { centroid, pan, zoom ->
-                                gestureState.onTransform(centroid * gestureState.scale + gestureState.offset,
-                                    pan * gestureState.scale, zoom)
-                            },
                             onCommit = { index, part ->
                                 val layer = selectedMask
                                 if (layer != null) {

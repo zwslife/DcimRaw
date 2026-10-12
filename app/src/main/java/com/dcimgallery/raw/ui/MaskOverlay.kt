@@ -4,9 +4,6 @@ import android.graphics.Bitmap
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
-import androidx.compose.foundation.gestures.calculateCentroid
-import androidx.compose.foundation.gestures.calculatePan
-import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -49,13 +46,11 @@ fun MaskOverlay(
     layer: MaskLayer?, componentIndex: Int, tool: MaskTool, subtract: Boolean,
     radius: Float, feather: Float, opacity: Float, showOverlay: Boolean,
     imageWidth: Int, imageHeight: Int, onCommit: (Int, MaskComponent) -> Unit,
-    onTransform: (Offset, Offset, Float) -> Unit,
     modifier: Modifier = Modifier,
     editable: Boolean = true,
 ) {
     val latestLayer by rememberUpdatedState(layer)
     val commit by rememberUpdatedState(onCommit)
-    val transform by rememberUpdatedState(onTransform)
     var draft by remember(layer?.id) { mutableStateOf<MaskComponent?>(null) }
     val overlay by produceState<Bitmap?>(null, layer?.id, layer?.components, layer?.inverted, imageWidth, imageHeight) {
         value = withContext(Dispatchers.Default) {
@@ -106,7 +101,6 @@ fun MaskOverlay(
                     if (event.changes.count { it.pressed } > 1) {
                         cancelled = true
                         draft = null
-                        transform(event.calculateCentroid(), event.calculatePan(), event.calculateZoom())
                         event.changes.forEach { it.consume() }
                         continue
                     }
