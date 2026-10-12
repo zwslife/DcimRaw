@@ -49,6 +49,7 @@ fun MaskPanel(
     opacity: Float, onOpacity: (Float) -> Unit,
     componentIndex: Int, onComponent: (Int) -> Unit,
     adjusting: Boolean, onAdjusting: (Boolean) -> Unit,
+    onToneDragging: (Boolean) -> Unit,
     showOverlay: Boolean, onOverlay: (Boolean) -> Unit, onClose: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -141,7 +142,8 @@ fun MaskPanel(
             if (adjusting) {
                 TonePanel(photoName = selected.name, params = selected.tone,
                     onParamsChange = { replace(selected.copy(tone = it)) },
-                    onReset = { replace(selected.copy(tone = ToneParams())) }, onClose = onClose, compactHeader = true)
+                    onReset = { replace(selected.copy(tone = ToneParams())) }, onClose = onClose,
+                    compactHeader = true, onDraggingChange = onToneDragging)
             } else {
                 Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp)) {
                     MaskTool.entries.forEach { item ->

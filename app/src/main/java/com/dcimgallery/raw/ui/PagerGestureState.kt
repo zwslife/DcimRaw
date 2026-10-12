@@ -2,6 +2,7 @@ package com.dcimgallery.raw.ui
 
 import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.tween
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -9,8 +10,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.unit.IntSize
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlin.math.abs
+import kotlin.math.exp
 
 /**
  * 大图页手势状态机（仿微信图片预览）。
@@ -29,8 +32,12 @@ class PagerGestureState {
     var offset by mutableStateOf(Offset.Zero); private set
     var dragY by mutableFloatStateOf(0f); private set
     var viewSize by mutableStateOf(IntSize.Zero)
+    var isTouching by mutableStateOf(false); private set
+    var isFlinging by mutableStateOf(false); private set
 
     private var scope: CoroutineScope? = null
+    private var flingJob: Job? = null
+    private var flingGeneration = 0
 
     fun attach(scope: CoroutineScope) {
         this.scope = scope
@@ -38,8 +45,54 @@ class PagerGestureState {
 
     val isZoomed: Boolean get() = scale > 1.02f
 
+    fun onTouchStart() {
+        stopFling()
+        isTouching = true
+    }
+
+    fun onTouchEnd() {
+        isTouching = false
+    }
+
+    private fun stopFling() {
+        flingGeneration++
+        flingJob?.cancel()
+        flingJob = null
+        isFlinging = false
+    }
+
+    /** 按松手速度继续平移，逐帧减速；到达图片边界即停止对应方向。 */
+    fun fling(velocity: Offset) {
+        if (!isZoomed || velocity.getDistance() < 120f) return
+        stopFling()
+        val activeScope = scope ?: return
+        val generation = flingGeneration
+        isFlinging = true
+        flingJob = activeScope.launch {
+            try {
+                var vx = velocity.x.coerceIn(-6000f, 6000f)
+                var vy = velocity.y.coerceIn(-6000f, 6000f)
+                var previous = withFrameNanos { it }
+                while (abs(vx) > 12f || abs(vy) > 12f) {
+                    val now = withFrameNanos { it }
+                    val seconds = ((now - previous) / 1_000_000_000f).coerceIn(0f, 0.05f)
+                    previous = now
+                    val decay = exp(-5.5f * seconds)
+                    val desired = offset + Offset(vx, vy) * ((1f - decay) / 5.5f)
+                    val actual = clamped(scale, desired)
+                    offset = actual
+                    vx = if (abs(actual.x - desired.x) > 0.5f) 0f else vx * decay
+                    vy = if (abs(actual.y - desired.y) > 0.5f) 0f else vy * decay
+                }
+            } finally {
+                if (generation == flingGeneration) isFlinging = false
+            }
+        }
+    }
+
     /** detectTransformGestures 回调。zoom≠1 为捏合；已缩放时 pan 为平移。 */
     fun onTransform(centroid: Offset, pan: Offset, zoom: Float) {
+        stopFling()
         when {
             zoom != 1f -> {
                 val newScale = (scale * zoom).coerceIn(MIN_SCALE, MAX_SCALE)
@@ -73,6 +126,7 @@ class PagerGestureState {
     }
 
     fun onDoubleTap(point: Offset) {
+        stopFling()
         scope?.launch {
             if (isZoomed) animateReset() else animateZoomTo(DOUBLE_TAP_SCALE, point)
         }
@@ -80,6 +134,8 @@ class PagerGestureState {
 
     /** 翻页时重置。 */
     fun reset() {
+        stopFling()
+        isTouching = false
         scale = 1f
         offset = Offset.Zero
         dragY = 0f

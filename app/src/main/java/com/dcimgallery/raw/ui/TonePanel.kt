@@ -58,6 +58,7 @@ fun TonePanel(
     onReset: () -> Unit,
     onClose: () -> Unit,
     compactHeader: Boolean = false,
+    onDraggingChange: (Boolean) -> Unit = {},
 ) {
     var section by rememberSaveable { mutableIntStateOf(0) } // 0曝光 1色彩 2HSL
     var hslIndex by rememberSaveable { mutableIntStateOf(0) }
@@ -118,6 +119,7 @@ fun TonePanel(
                 range = active.range,
                 accent = accent,
                 onChange = { onParamsChange(active.set(params, it)) },
+                onDraggingChange = onDraggingChange,
             )
         }
 
@@ -243,9 +245,11 @@ private fun DialSlider(
     range: ClosedFloatingPointRange<Float>,
     accent: Color,
     onChange: (Float) -> Unit,
+    onDraggingChange: (Boolean) -> Unit,
 ) {
     val currentValue by rememberUpdatedState(value)
     val currentOnChange by rememberUpdatedState(onChange)
+    val currentOnDraggingChange by rememberUpdatedState(onDraggingChange)
     Box(
         Modifier
             .fillMaxWidth()
@@ -259,7 +263,9 @@ private fun DialSlider(
                 .pointerInput(range) {
                     var dragValue = currentValue
                     detectHorizontalDragGestures(
-                        onDragStart = { dragValue = currentValue },
+                        onDragStart = { dragValue = currentValue; currentOnDraggingChange(true) },
+                        onDragEnd = { currentOnDraggingChange(false) },
+                        onDragCancel = { currentOnDraggingChange(false) },
                     ) { change, amount ->
                         change.consume()
                         // 刻度跟手移动，中央指针固定；向左拖动提高数值。

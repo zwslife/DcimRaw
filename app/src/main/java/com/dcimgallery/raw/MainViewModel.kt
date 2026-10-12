@@ -6,6 +6,7 @@ import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.net.Uri
 import android.os.Build
+import android.os.Process
 import android.provider.DocumentsContract
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
@@ -326,8 +327,19 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 val dst = Bitmap.createBitmap(src.width, src.height, Bitmap.Config.ARGB_8888)
                 var published = false
                 try {
-                    if (RawDecoder.renderToneFull(src, data.matrix, data.lut, data.hsl, dst) &&
-                        fullMasks.apply(dst, maskLayers)) {
+                    val rendered = withContext(Dispatchers.IO) {
+                        val threadId = Process.myTid()
+                        val previousPriority = Process.getThreadPriority(threadId)
+                        try {
+                            // 全尺寸补帧让出 CPU；拨盘实时预览保持正常优先级。
+                            Process.setThreadPriority(Process.THREAD_PRIORITY_BACKGROUND)
+                            RawDecoder.renderToneFull(src, data.matrix, data.lut, data.hsl, dst) &&
+                                fullMasks.apply(dst, maskLayers)
+                        } finally {
+                            Process.setThreadPriority(previousPriority)
+                        }
+                    }
+                    if (rendered) {
                         withContext(Dispatchers.Main.immediate) {
                             if ((_toneParams.value[uri] ?: ToneParams()) == params &&
                                 _masks.value[uri].orEmpty() == maskLayers && toneHandleUri == uri) {
