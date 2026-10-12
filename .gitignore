@@ -1,0 +1,15 @@
+.gradle/
+build/
+*/build/
+local.properties
+toolchain/
+analysis/
+*.iml
+.idea/
+.cxx/
+externalNativeBuild/
+.kotlin/
+.workbuddy/
+*.apk
+*.CR3
+*.cr3
