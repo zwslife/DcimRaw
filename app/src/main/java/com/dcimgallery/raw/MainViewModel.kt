@@ -22,6 +22,7 @@ import com.dcimgallery.raw.core.tone.MaskLayer
 import com.dcimgallery.raw.core.tone.MaskRenderCache
 import com.dcimgallery.raw.core.tone.PhotoEditStore
 import com.dcimgallery.raw.core.tone.PhotoEdits
+import com.dcimgallery.raw.core.tone.PhotoEditClipboard
 import com.dcimgallery.raw.data.db.PhotoEntity
 import com.dcimgallery.raw.data.repo.PhotoRepository
 import kotlinx.coroutines.Dispatchers
@@ -103,6 +104,37 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val loadingEdits = mutableMapOf<String, Job>()
     private val pendingSaves = mutableMapOf<String, Job>()
     private val editSaveMutex = Mutex()
+    private val editClipboard = PhotoEditClipboard()
+    val canPasteEdits = MutableStateFlow(false)
+
+    fun copyEdits(uri: String) {
+        viewModelScope.launch {
+            loadEdits(uri)?.join()
+            editClipboard.copy(PhotoEdits(_toneParams.value[uri] ?: ToneParams(), _masks.value[uri].orEmpty()))
+            canPasteEdits.value = editClipboard.hasValue
+            toast.value = "已复制调色参数（含蒙版）"
+        }
+    }
+
+    fun pasteEdits(uri: String) {
+        val edits = editClipboard.paste() ?: return
+        applyEdits(uri, edits)
+        toast.value = "已粘贴调色参数（含蒙版）"
+    }
+
+    fun resetEdits(uri: String) {
+        applyEdits(uri, PhotoEdits())
+        toast.value = "已复位全部调色及蒙版"
+    }
+
+    private fun applyEdits(uri: String, edits: PhotoEdits) {
+        _toneParams.update { it + (uri to edits.tone) }
+        _masks.update { it + (uri to edits.masks) }
+        if (toneFull.value?.first == uri) toneFull.value = null
+        if (tonePreview.value?.first == uri) tonePreview.value = null
+        renderTonePreview(uri)
+        saveEdits(uri)
+    }
 
     fun setMasks(uri: String, layers: List<MaskLayer>) {
         _masks.update { it + (uri to layers) }

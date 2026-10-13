@@ -118,6 +118,10 @@ fun PhotoPagerScreen(
     toneFull: Pair<String, Bitmap>?,
     masks: Map<String, List<MaskLayer>>,
     onMasksChange: (String, List<MaskLayer>) -> Unit,
+    canPasteEdits: Boolean,
+    onCopyEdits: (String) -> Unit,
+    onPasteEdits: (String) -> Unit,
+    onResetEdits: (String) -> Unit,
     loadExif: suspend (PhotoEntity) -> ExifInfo?,
     onEnsureDecoded: (PhotoEntity) -> Unit,
     onExport: (PhotoEntity) -> Unit,
@@ -493,8 +497,13 @@ fun PhotoPagerScreen(
                         StudioIconButton(StudioSymbol.Ellipsis, "更多", { showMore = true })
                         DropdownMenu(showMore, { showMore = false }) {
                             if (isCr3) {
-                                DropdownMenuItem(text = { Text("复位全局调色") }, leadingIcon = { StudioIcon(StudioSymbol.RotateCcw) },
-                                    onClick = { current?.let { onToneChange(it.uri, ToneParams()) }; showMore = false })
+                                DropdownMenuItem(text = { Text("复制调色参数") }, leadingIcon = { StudioIcon(StudioSymbol.Copy) },
+                                    onClick = { current?.let { onCopyEdits(it.uri) }; showMore = false })
+                                DropdownMenuItem(text = { Text("粘贴调色参数") }, leadingIcon = { StudioIcon(StudioSymbol.Paste) },
+                                    enabled = canPasteEdits,
+                                    onClick = { current?.let { onPasteEdits(it.uri) }; showMore = false })
+                                DropdownMenuItem(text = { Text("复位全部调色") }, leadingIcon = { StudioIcon(StudioSymbol.RotateCcw) },
+                                    onClick = { current?.let { onResetEdits(it.uri) }; showMore = false })
                                 DropdownMenuItem(text = { Text("删除原片", color = Color(0xFFBA1A1A)) },
                                     leadingIcon = { StudioIcon(StudioSymbol.Trash2, tint = Color(0xFFBA1A1A)) },
                                     onClick = { showMore = false; showDeleteConfirm = true })
@@ -564,7 +573,7 @@ fun PhotoPagerScreen(
                     photoName = current.displayName,
                     params = tone,
                     onParamsChange = { onToneChange(current.uri, it) },
-                    onReset = { onToneChange(current.uri, ToneParams()) },
+                    onReset = { onResetEdits(current.uri) },
                     onDraggingChange = { toneDragging = it },
                     onClose = {
                         showTone = false

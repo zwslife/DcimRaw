@@ -50,6 +50,7 @@ enum class StudioSymbol(val resource: Int) {
     Plus(R.drawable.studio_plus),
     FlipHorizontal(R.drawable.studio_flip_horizontal),
     Copy(R.drawable.studio_copy),
+    Paste(R.drawable.studio_clipboard_paste),
     Pencil(R.drawable.studio_pencil),
     Layers2(R.drawable.studio_layers2),
     Brush(R.drawable.studio_brush),

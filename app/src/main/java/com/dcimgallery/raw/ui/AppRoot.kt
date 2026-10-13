@@ -51,6 +51,7 @@ fun AppRoot(viewModel: MainViewModel = viewModel()) {
     val tonePreview by viewModel.tonePreview.collectAsState()
     val toneFull by viewModel.toneFull.collectAsState()
     val masks by viewModel.masks.collectAsState()
+    val canPasteEdits by viewModel.canPasteEdits.collectAsState()
     val toast by viewModel.toast.collectAsState()
 
     // 网格滚动状态提升到此处保活：进出大图页不丢失浏览位置
@@ -98,6 +99,10 @@ fun AppRoot(viewModel: MainViewModel = viewModel()) {
                 toneFull = toneFull,
                 masks = masks,
                 onMasksChange = viewModel::setMasks,
+                canPasteEdits = canPasteEdits,
+                onCopyEdits = viewModel::copyEdits,
+                onPasteEdits = viewModel::pasteEdits,
+                onResetEdits = viewModel::resetEdits,
                 loadExif = { photo ->
                     withContext(Dispatchers.IO) {
                         ExifReader.read(context, Uri.parse(photo.uri), photo.source)

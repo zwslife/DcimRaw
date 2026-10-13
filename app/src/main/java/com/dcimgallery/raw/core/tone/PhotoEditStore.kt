@@ -7,8 +7,6 @@ import org.json.JSONObject
 import java.io.File
 import java.security.MessageDigest
 
-data class PhotoEdits(val tone: ToneParams, val masks: List<MaskLayer>)
-
 /** 非破坏性编辑保存在应用私有目录，原始 CR3 不会被修改。 */
 class PhotoEditStore(context: Context) {
     private val directory = File(context.filesDir, "photo-edits").apply { mkdirs() }
