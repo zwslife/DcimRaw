@@ -12,6 +12,20 @@ data class HistogramData(
         blue.maxOrNull() ?: 0, luminance.maxOrNull() ?: 0).coerceAtLeast(1)
 
     companion object {
+        /** Small Gaussian kernel for display only; original bin counts remain exact. */
+        fun smooth(bins: IntArray): FloatArray {
+            val weights = intArrayOf(1, 4, 6, 4, 1)
+            return FloatArray(bins.size) { index ->
+                var sum = 0f
+                var weight = 0
+                for (k in weights.indices) {
+                    val at = index + k - 2
+                    if (at in bins.indices) { sum += bins[at] * weights[k].toFloat(); weight += weights[k] }
+                }
+                if (weight == 0) 0f else sum / weight
+            }
+        }
+
         /** 按网格中心采样整张照片；透明像素不计入，不受缩放或蒙版叠加色影响。 */
         fun sample(width: Int, height: Int, readRow: (Int, IntArray) -> Unit): HistogramData {
             require(width > 0 && height > 0)

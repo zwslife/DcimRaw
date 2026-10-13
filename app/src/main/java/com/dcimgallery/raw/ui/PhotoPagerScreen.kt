@@ -29,6 +29,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
@@ -79,6 +80,11 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.DpSize
+import androidx.compose.ui.platform.LocalViewConfiguration
+import androidx.compose.ui.platform.ViewConfiguration
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.semantics.contentDescription
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.dcimgallery.raw.core.coil.Cr3Image
@@ -149,6 +155,7 @@ fun PhotoPagerScreen(
     val fallbackBitmaps = remember { mutableStateMapOf<String, Bitmap>() }
 
     val current = photos.getOrNull(pagerState.currentPage)
+    var comparingOriginal by remember(current?.uri) { mutableStateOf(false) }
     val isCr3 = current?.source == "external"
     val usbPhotos by produceState(emptySet<String>(), photos) { value = StorageOrigin.usbPhotos(context, photos) }
     val currentMasks = current?.let { masks[it.uri] }.orEmpty()
@@ -189,7 +196,7 @@ fun PhotoPagerScreen(
     // Use the same edited frame as the photo, excluding the colored mask overlay.
     val histogramBitmap = current?.let { photo ->
         val decoded = decodedMap[photo.uri]
-        (if (hasCurrentEdits) toneFull?.takeIf { it.first == photo.uri }?.second
+        (if (hasCurrentEdits && !comparingOriginal) toneFull?.takeIf { it.first == photo.uri }?.second
             ?: tonePreview?.takeIf { it.first == photo.uri }?.second ?: decoded else decoded)
             ?: fallbackBitmaps[photo.uri]
     }
@@ -392,6 +399,7 @@ fun PhotoPagerScreen(
                     val prevBmp = tonePreview?.takeIf { it.first == photo.uri }?.second
                     val hasLocalTone = masks[photo.uri].orEmpty().any { it.enabled && !it.tone.isNeutral }
                     val displayBitmap = when {
+                        isCurrent && comparingOriginal -> decoded
                         tone.isNeutral && !hasLocalTone -> decoded
                         isCurrent && (showTone || showMasks) -> fullBmp ?: prevBmp ?: decoded
                         else -> fullBmp ?: prevBmp ?: decoded
@@ -400,9 +408,9 @@ fun PhotoPagerScreen(
                         MaskOverlay(
                             layer = selectedMask, componentIndex = maskComponent, tool = maskTool,
                             subtract = maskSubtract, radius = maskRadius, feather = maskFeather,
-                            opacity = maskOpacity, showOverlay = maskOverlay,
+                            opacity = maskOpacity, showOverlay = maskOverlay && !comparingOriginal,
                             imageWidth = decoded.width, imageHeight = decoded.height,
-                            editable = !maskAdjusting,
+                            editable = !maskAdjusting && !comparingOriginal,
                             onCommit = { index, part ->
                                 val layer = selectedMask
                                 if (layer != null) {
@@ -469,11 +477,18 @@ fun PhotoPagerScreen(
                             color = StudioColors.Muted,
                         )
                     }
-                    HistogramIconButton(shown = showHistogram, onClick = ::toggleHistogram)
-                    StudioIconButton(StudioSymbol.Info, "信息", {
-                        showInfo = !showInfo
-                        if (showInfo) { showTone = false; if (showMasks) finishMasks() }
-                    }, selected = showInfo)
+                    val config = LocalViewConfiguration.current
+                    val compactConfig = remember(config) { object : ViewConfiguration by config {
+                        override val minimumTouchTargetSize = DpSize(32.dp, 32.dp)
+                    } }
+                    CompositionLocalProvider(LocalViewConfiguration provides compactConfig) {
+                        HistogramIconButton(shown = showHistogram, onClick = ::toggleHistogram, modifier = Modifier.size(32.dp))
+                        Spacer(Modifier.width(4.dp))
+                        StudioIconButton(StudioSymbol.Info, "信息", {
+                            showInfo = !showInfo
+                            if (showInfo) { showTone = false; if (showMasks) finishMasks() }
+                        }, modifier = Modifier.size(32.dp), selected = showInfo)
+                    }
                     Box {
                         StudioIconButton(StudioSymbol.Ellipsis, "更多", { showMore = true })
                         DropdownMenu(showMore, { showMore = false }) {
@@ -499,7 +514,7 @@ fun PhotoPagerScreen(
                 Row(Modifier.fillMaxWidth().onSizeChanged { dockHeight = it.height }
                     .background(Color.White).navigationBarsPadding().padding(horizontal = 36.dp, vertical = 8.dp),
                     horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
-                    StudioTool(StudioSymbol.Palette, "调色", { showTone = true; showInfo = false }, selected = true, primary = true)
+                    StudioTool(StudioSymbol.Palette, "调色", { showTone = true; showInfo = false })
                     StudioTool(StudioSymbol.Scan, "蒙版", {
                         gestureState.reset(); showMasks = true; showTone = false; showInfo = false
                         maskAdjusting = false; maskOverlay = true; maskComponent = -1
@@ -507,6 +522,25 @@ fun PhotoPagerScreen(
                     StudioTool(StudioSymbol.ArrowUpFromLine, if (exporting) "导出中…" else "导出",
                         { showExport = true }, enabled = current != null && !exporting)
                 }
+            }
+        }
+
+        if (curDecodedReady && !showInfo && (uiVisible || showTone || showMasks)) {
+            val bottom = with(LocalDensity.current) {
+                when { showMasks -> maskPanelHeight.toDp(); showTone -> tonePanelHeight.toDp(); isCr3 -> dockHeight.toDp(); else -> 0.dp }
+            }
+            DisposableEffect(current?.uri) { onDispose { comparingOriginal = false } }
+            Box(Modifier.align(Alignment.BottomEnd).padding(end = 12.dp, bottom = bottom + 12.dp)
+                .size(36.dp).clip(RoundedCornerShape(10.dp))
+                .background(Color.White.copy(alpha = .8f))
+                .semantics { contentDescription = "长按对比未调色原图"; stateDescription = if (comparingOriginal) "原图" else "调色后" }
+                .pointerInput(current?.uri) {
+                    detectTapGestures(onPress = {
+                        comparingOriginal = true
+                        try { tryAwaitRelease() } finally { comparingOriginal = false }
+                    })
+                }, contentAlignment = Alignment.Center) {
+                StudioIcon(StudioSymbol.Contrast, Modifier.size(20.dp), tint = StudioColors.Ink)
             }
         }
 

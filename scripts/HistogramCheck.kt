@@ -27,5 +27,18 @@ fun main() {
     val before = colors(0xff404040.toInt())
     val after = colors(0xffc0c0c0.toInt())
     check(before.luminance[64] == 1 && after.luminance[192] == 1 && after.luminance[64] == 0)
-    println("PASS: RGB/luminance bins, black/white endpoints, transparency, edited frames and 16K-sample bound")
+    val flat = IntArray(256) { 40 }
+    check(HistogramData.smooth(flat).all { it == 40f }) { "Smoothing must preserve a flat histogram, including endpoints" }
+    check(HistogramData.smooth(IntArray(256)).all { it == 0f })
+    val impulse = IntArray(256).also { it[128] = 160 }
+    val curve = HistogramData.smooth(impulse)
+    check(curve[128] > curve[127] && curve[127] > curve[126] && curve[126] > 0f)
+    check(curve[126] == curve[130] && curve[127] == curve[129])
+    check(kotlin.math.abs(curve.sum() - 160f) < .001f)
+    check(impulse[128] == 160 && impulse.sum() == 160) { "Display smoothing must not alter source counts" }
+    for (edge in listOf(0, 255)) {
+        val values = HistogramData.smooth(IntArray(256).also { it[edge] = 100 })
+        check(values.all { it.isFinite() && it >= 0f } && values[edge] > 0f)
+    }
+    println("PASS: RGB/luminance bins, black/white endpoints, transparency, edited frames, 16K-sample bound and non-destructive Gaussian display smoothing")
 }

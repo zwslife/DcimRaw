@@ -57,13 +57,14 @@ fun MaskPanel(
     var rename by rememberSaveable { mutableStateOf("") }
     val scroll = rememberScrollState()
     val history = remember { mutableStateListOf<List<MaskLayer>>() }
+    val redo = remember { mutableStateListOf<List<MaskLayer>>() }
     var settled by remember { mutableStateOf(layers) }
     var dragging by remember { mutableStateOf(false) }
     var restoring by remember { mutableStateOf(false) }
     // Coalesce slider movement into one undo; drawing, creation and menu actions are also undoable.
     LaunchedEffect(layers, dragging) {
         if (!dragging && settled != layers) {
-            if (!restoring) history.add(settled)
+            if (!restoring) { history.add(settled); redo.clear() }
             settled = layers; restoring = false
         }
     }
@@ -99,17 +100,24 @@ fun MaskPanel(
             PorcelainHeader(onUndo = {
                 if (history.isNotEmpty()) {
                     val snapshot = history.removeAt(history.lastIndex)
+                    redo.add(layers)
                     restoring = true; onChange(snapshot)
                     if (snapshot.none { it.id == selectedId }) onSelect(snapshot.lastOrNull()?.id)
                 }
-            }, onDone = onClose, canUndo = history.isNotEmpty())
+            }, onDone = onClose, canUndo = history.isNotEmpty(), onRedo = {
+                if (redo.isNotEmpty()) {
+                    val snapshot = redo.removeAt(redo.lastIndex)
+                    history.add(layers); restoring = true; onChange(snapshot)
+                    if (snapshot.none { it.id == selectedId }) onSelect(snapshot.lastOrNull()?.id)
+                }
+            }, canRedo = redo.isNotEmpty())
             if (selected != null) EditorTabs(section, { sections[selected.id] = it }, includeRange = true)
-            Column(Modifier.weight(1f).verticalScroll(scroll).padding(horizontal = 22.dp, vertical = 12.dp)) {
+            Column(Modifier.weight(1f).verticalScroll(scroll).padding(horizontal = 18.dp, vertical = 6.dp)) {
                 if (layers.isNotEmpty()) {
-                    Row(Modifier.fillMaxWidth().padding(bottom = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                        EditorAction(StudioSymbol.Plus, "新建蒙版", { dialog = "create" })
+                    Row(Modifier.fillMaxWidth().padding(bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                         Row(Modifier.weight(1f).horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(5.dp)) {
                             layers.forEach { layer -> MaskThumbnail(layer, layer.id == selectedId, thumbnail) { onSelect(layer.id) } }
+                            EditorAction(StudioSymbol.Plus, "新建蒙版", { dialog = "create" })
                         }
                         if (selected != null) EditorAction(StudioSymbol.Ellipsis, "蒙版选项", { dialog = "actions" })
                     }
@@ -191,11 +199,11 @@ private fun MenuAction(label: String, icon: StudioSymbol, danger: Boolean = fals
 
 @Composable
 private fun MaskThumbnail(layer: MaskLayer, selected: Boolean, photo: Bitmap?, onSelect: () -> Unit) {
-    Column(Modifier.width(70.dp).clip(RoundedCornerShape(12.dp))
+    Column(Modifier.width(52.dp).clip(RoundedCornerShape(10.dp))
         .background(if (selected) Color(0xFFEFF4EB) else Color.Transparent)
-        .clickable(onClick = onSelect).semantics { this.selected = selected }.padding(vertical = 5.dp),
+        .clickable(onClick = onSelect).semantics { this.selected = selected }.padding(vertical = 3.dp),
         horizontalAlignment = Alignment.CenterHorizontally) {
-        Box(Modifier.size(42.dp, 38.dp).clip(RoundedCornerShape(8.dp)).background(Color(0xFF33483B))) {
+        Box(Modifier.size(30.dp, 26.dp).clip(RoundedCornerShape(6.dp)).background(Color(0xFF33483B))) {
             if (photo != null && !photo.isRecycled) Image(photo.asImageBitmap(), null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
             Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = .55f)))
             Canvas(Modifier.fillMaxSize()) {
@@ -207,7 +215,7 @@ private fun MaskThumbnail(layer: MaskLayer, selected: Boolean, photo: Bitmap?, o
                 }
             }
         }
-        Spacer(Modifier.height(5.dp))
+        Spacer(Modifier.height(3.dp))
         Text(layer.name, fontSize = 11.sp, color = if (selected) EditorPine else StudioColors.Muted,
             maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(horizontal = 3.dp))
     }

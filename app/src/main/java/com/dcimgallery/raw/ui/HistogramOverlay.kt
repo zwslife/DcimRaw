@@ -19,6 +19,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -70,8 +71,10 @@ fun HistogramOverlay(
 
 @Composable
 private fun HistogramCard(data: HistogramData?, modifier: Modifier = Modifier) {
-    Column(modifier.width(144.dp).clip(RoundedCornerShape(12.dp)).background(Color.White)
-        .border(1.dp, Color(0xFFE1E3E6), RoundedCornerShape(12.dp)).padding(8.dp)
+    val channels = remember(data) { data?.let { listOf(it.luminance, it.red, it.green, it.blue).map(HistogramData::smooth) } }
+    val peak = channels?.maxOf { it.maxOrNull() ?: 0f }?.coerceAtLeast(1f) ?: 1f
+    Column(modifier.width(144.dp).clip(RoundedCornerShape(12.dp)).background(Color.White.copy(alpha = .32f))
+        .padding(8.dp)
         .semantics { contentDescription = "整张照片的亮度和红绿蓝直方图，左侧为暗部，右侧为亮部" }) {
         if (data == null) {
             Box(Modifier.fillMaxWidth().height(46.dp), contentAlignment = Alignment.Center) {
@@ -82,26 +85,28 @@ private fun HistogramCard(data: HistogramData?, modifier: Modifier = Modifier) {
                 val baseline = size.height - 1.dp.toPx()
                 for (i in 1..3) {
                     val x = size.width * i / 4f
-                    drawLine(Color(0xFFE8EAED), Offset(x, 0f), Offset(x, baseline), 1.dp.toPx())
+                    drawLine(Color.White.copy(alpha = .25f), Offset(x, 0f), Offset(x, baseline), 1.dp.toPx())
                 }
-                fun channel(bins: IntArray, color: Color, fill: Float) {
+                fun channel(bins: FloatArray, color: Color, fill: Float) {
                     val path = Path()
-                    path.moveTo(0f, baseline)
-                    for (i in 0..255) {
+                    fun y(i: Int) = baseline - sqrt(bins[i] / peak) * baseline
+                    path.moveTo(0f, y(0))
+                    for (i in 1..255) {
                         val x = size.width * i / 255f
-                        val height = sqrt(bins[i].toFloat() / data.peak) * baseline
-                        path.lineTo(x, baseline - height)
+                        val mid = size.width * (i - .5f) / 255f
+                        path.cubicTo(mid, y(i - 1), mid, y(i), x, y(i))
                     }
-                    path.lineTo(size.width, baseline)
-                    path.close()
-                    drawPath(path, color.copy(alpha = fill))
                     drawPath(path, color, style = Stroke(1.dp.toPx()))
+                    path.lineTo(size.width, baseline); path.lineTo(0f, baseline); path.close()
+                    drawPath(path, color.copy(alpha = fill))
                 }
-                channel(data.luminance, Color(0xFF737981), 0.18f)
-                channel(data.red, Color(0xFFC84343), 0.12f)
-                channel(data.green, Color(0xFF28834D), 0.12f)
-                channel(data.blue, Color(0xFF367AC7), 0.12f)
-                drawLine(Color(0xFFB7BCC3), Offset(0f, baseline), Offset(size.width, baseline), 1.dp.toPx())
+                channels?.let {
+                    channel(it[0], Color(0xFF737981), 0.1f)
+                    channel(it[1], Color(0xFFC84343), 0.08f)
+                    channel(it[2], Color(0xFF28834D), 0.08f)
+                    channel(it[3], Color(0xFF367AC7), 0.08f)
+                }
+                drawLine(Color(0xFFB7BCC3).copy(alpha = .4f), Offset(0f, baseline), Offset(size.width, baseline), 1.dp.toPx())
             }
         }
         Row(Modifier.fillMaxWidth().padding(top = 3.dp), horizontalArrangement = Arrangement.SpaceBetween) {

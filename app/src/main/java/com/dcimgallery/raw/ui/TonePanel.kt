@@ -16,18 +16,21 @@ fun TonePanel(photoName: String, params: ToneParams, onParamsChange: (ToneParams
     onDraggingChange: (Boolean) -> Unit = {}) {
     var section by rememberSaveable(photoName) { mutableIntStateOf(0) }
     val history = remember(photoName) { mutableStateListOf<ToneParams>() }
+    val redo = remember(photoName) { mutableStateListOf<ToneParams>() }
     var before by remember(photoName) { mutableStateOf<ToneParams?>(null) }
     val current by rememberUpdatedState(params)
     val scroll = rememberScrollState()
     LaunchedEffect(section) { scroll.scrollTo(0) }
     PorcelainPanel {
         PorcelainHeader(onUndo = {
-            if (history.isNotEmpty()) onParamsChange(history.removeAt(history.lastIndex))
-        }, onDone = onClose, canUndo = history.isNotEmpty())
+            if (history.isNotEmpty()) { redo.add(current); onParamsChange(history.removeAt(history.lastIndex)) }
+        }, onDone = onClose, canUndo = history.isNotEmpty(), onRedo = {
+            if (redo.isNotEmpty()) { history.add(current); onParamsChange(redo.removeAt(redo.lastIndex)) }
+        }, canRedo = redo.isNotEmpty())
         EditorTabs(section, { section = it })
-        Column(Modifier.weight(1f).verticalScroll(scroll).padding(horizontal = 22.dp, vertical = 12.dp)) {
+        Column(Modifier.weight(1f).verticalScroll(scroll).padding(horizontal = 18.dp, vertical = 6.dp)) {
             ToneRows(section, params, { next ->
-                before?.takeIf { it != next }?.let { history.add(it); before = null }
+                before?.takeIf { it != next }?.let { history.add(it); redo.clear(); before = null }
                 onParamsChange(next)
             }, photoName, onGesture = { active ->
                 if (active) before = current else before = null
@@ -73,7 +76,7 @@ internal fun ToneRows(section: Int, params: ToneParams, onChange: (ToneParams) -
 private fun ToneControlRow(control: ChipDef, params: ToneParams, onChange: (ToneParams) -> Unit,
     key: String, onGesture: (Boolean) -> Unit) {
     val current by rememberUpdatedState(params)
-    ParameterSlider(control.label, control.format(control.get(params)) + if (control.id == "曝光") " EV" else "",
+    ParameterSlider(control.label, control.format(control.get(params)),
         control.get(params), control.range, control.default, key,
         onChange = { onChange(control.set(current, it)) }, onGesture = onGesture)
 }

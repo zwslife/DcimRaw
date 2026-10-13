@@ -42,10 +42,12 @@ internal fun PorcelainPanel(modifier: Modifier = Modifier, content: @Composable 
 }
 
 @Composable
-internal fun PorcelainHeader(onUndo: () -> Unit, onDone: () -> Unit, canUndo: Boolean) {
+internal fun PorcelainHeader(onUndo: () -> Unit, onDone: () -> Unit, canUndo: Boolean,
+    onRedo: () -> Unit, canRedo: Boolean) {
     Row(Modifier.fillMaxWidth().height(40.dp).padding(horizontal = 16.dp),
         horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
         EditorAction(StudioSymbol.Undo2, "撤回上一次调整", onUndo, enabled = canUndo)
+        EditorAction(StudioSymbol.Redo2, "重做上一次调整", onRedo, enabled = canRedo)
         EditorAction(StudioSymbol.Check, "确认调整", onDone, filled = true)
     }
 }
@@ -117,14 +119,14 @@ internal fun ParameterSlider(label: String, display: String, value: Float, range
     val change by rememberUpdatedState(onChange)
     val gesture by rememberUpdatedState(onGesture)
     DisposableEffect(controlKey) { onDispose { gesture(false) } }
-    Row(Modifier.fillMaxWidth().height(60.dp), verticalAlignment = Alignment.CenterVertically) {
-        Row(Modifier.width(96.dp), verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+    Row(Modifier.fillMaxWidth().height(48.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.width(80.dp), verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             Text(label, color = Color(0xFF6C7A6E), fontSize = 12.sp, modifier = Modifier.widthIn(max = 64.dp).weight(1f, fill = false))
             Text(display, color = if (abs(value - default) > .0001f) EditorPine else EditorMuted,
                 fontSize = 11.sp, fontFamily = FontFamily.Monospace, maxLines = 1)
         }
-        Spacer(Modifier.width(8.dp))
+        Spacer(Modifier.width(2.dp))
         Canvas(Modifier.weight(1f).height(46.dp)
             .semantics {
                 contentDescription = label
