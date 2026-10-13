@@ -19,6 +19,7 @@ class GalleryApp : Application(), ImageLoaderFactory {
 
     override fun onCreate() {
         super.onCreate()
+        CrashRecord.install(this)
         db = AppDatabase.build(this)
         PreviewCache.init(this)
         DecodedCache.init(this)

@@ -19,6 +19,7 @@ class MainActivity : ComponentActivity() {
         setContent {
             AppTheme {
                 AppRoot()
+                com.dcimgallery.raw.ui.CrashReportDialog()
             }
         }
     }
