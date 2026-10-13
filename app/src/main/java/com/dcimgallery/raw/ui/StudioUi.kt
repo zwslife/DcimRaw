@@ -12,6 +12,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
@@ -111,12 +112,24 @@ fun StudioTool(symbol: StudioSymbol, label: String, onClick: () -> Unit,
 
 @Composable
 fun StudioPanelHeader(title: String, onClose: () -> Unit, onReset: (() -> Unit)? = null) {
-    Box(Modifier.fillMaxWidth().padding(top = 8.dp), contentAlignment = Alignment.Center) {
-        Box(Modifier.size(30.dp, 4.dp).clip(CircleShape).background(StudioColors.Line))
-    }
-    Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
         Text(title, Modifier.weight(1f), style = MaterialTheme.typography.titleSmall, color = StudioColors.Ink)
         if (onReset != null) StudioIconButton(StudioSymbol.RotateCcw, "复位", onReset)
         StudioIconButton(StudioSymbol.Check, "完成", onClose, filled = true)
+    }
+}
+
+/** Inline choices keep a single 44 dp touch target without stacking an icon above its label. */
+@Composable
+fun StudioChoice(label: String, onClick: () -> Unit, modifier: Modifier = Modifier,
+    symbol: StudioSymbol? = null, selected: Boolean = false, expandable: Boolean = false) {
+    Row(modifier.height(44.dp).clip(RoundedCornerShape(12.dp))
+        .background(if (selected) StudioColors.Tint else Color.Transparent)
+        .clickable(onClick = onClick).padding(horizontal = 10.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        if (symbol != null) StudioIcon(symbol, Modifier.size(18.dp), tint = if (selected) StudioColors.Pine else StudioColors.Muted)
+        Text(label, style = MaterialTheme.typography.labelMedium, maxLines = 1,
+            color = if (selected) StudioColors.Pine else StudioColors.Muted)
+        if (expandable) StudioIcon(StudioSymbol.ChevronRight, Modifier.size(14.dp).rotate(90f), tint = StudioColors.Muted)
     }
 }

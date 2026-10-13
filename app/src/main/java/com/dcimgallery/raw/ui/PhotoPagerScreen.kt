@@ -221,7 +221,7 @@ fun PhotoPagerScreen(
         Modifier
             .fillMaxSize(),
     ) {
-        val panelHeightLimit = maxHeight * .6f
+        val panelHeightLimit = maxHeight * .5f
         // 背景层：下滑时淡出
         Box(Modifier.fillMaxSize().background(StudioColors.Canvas.copy(alpha = 1f - dragProgress * 0.9f)))
 
@@ -520,8 +520,6 @@ fun PhotoPagerScreen(
             Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth().heightIn(max = panelHeightLimit)
                 .onSizeChanged { tonePanelHeight = it.height }.verticalScroll(rememberScrollState())) {
                 TonePanel(
-                    onMasks = { gestureState.reset(); showTone = false; showMasks = true; maskAdjusting = false; maskOverlay = true },
-                    onExport = { showExport = true },
                     photoName = current.displayName,
                     params = tone,
                     onParamsChange = { onToneChange(current.uri, it) },
@@ -551,7 +549,6 @@ fun PhotoPagerScreen(
                 showOverlay = maskOverlay, onOverlay = { maskOverlay = it }, onClose = ::finishMasks,
                 modifier = Modifier.align(Alignment.BottomCenter).heightIn(max = panelHeightLimit)
                     .onSizeChanged { maskPanelHeight = it.height }.verticalScroll(rememberScrollState()),
-                onGlobalTone = { finishMasks(); showTone = true }, onExport = { showExport = true },
             )
         }
 

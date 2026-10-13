@@ -25,6 +25,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.LaunchedEffect
@@ -61,13 +64,14 @@ fun TonePanel(
     onReset: () -> Unit,
     onClose: () -> Unit,
     compactHeader: Boolean = false,
-    onMasks: (() -> Unit)? = null,
-    onExport: (() -> Unit)? = null,
     onDraggingChange: (Boolean) -> Unit = {},
 ) {
     var section by rememberSaveable { mutableIntStateOf(0) }
     var hslIndex by rememberSaveable { mutableIntStateOf(0) }
     var gradeIndex by rememberSaveable { mutableIntStateOf(0) }
+    var showSections by remember { mutableStateOf(false) }
+    var parameterMenu by remember { mutableStateOf<String?>(null) }
+    var showGrade by remember { mutableStateOf(false) }
     var activeChip by rememberSaveable { mutableStateOf("曝光") }
 
     val safeSection = section.coerceIn(0, 5)
@@ -81,30 +85,34 @@ fun TonePanel(
         StudioSymbol.Sparkles, StudioSymbol.Aperture, StudioSymbol.Focus)
     Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp))
         .background(Color.White).then(if (compactHeader) Modifier else Modifier.navigationBarsPadding())) {
-        if (!compactHeader) StudioPanelHeader("${sections[safeSection]} · 全局调整", onClose, onReset)
-        else Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Text("局部调整", Modifier.weight(1f).padding(start = 20.dp), style = MaterialTheme.typography.labelMedium)
-            StudioIconButton(StudioSymbol.RotateCcw, "复位局部调色", onReset)
-        }
-        Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp)) {
-            sections.forEachIndexed { index, name ->
-                StudioTool(sectionIcons[index], name, {
-                    section = index
-                    activeChip = toneControls(index, safeHslIndex, safeGradeIndex, params.blackWhite).first().id
-                }, modifier = Modifier.weight(1f), selected = section == index)
+        // Scope first, category in a menu, then parameters. Only one editing level is expanded.
+        Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.weight(1f)) {
+                StudioChoice(if (compactHeader) sections[safeSection] else "全局 · ${sections[safeSection]}",
+                    { showSections = true }, symbol = sectionIcons[safeSection], selected = true, expandable = true)
+                DropdownMenu(showSections, { showSections = false }) {
+                    sections.forEachIndexed { index, name ->
+                        DropdownMenuItem(text = { Text(name, color = if (index == safeSection) accent else StudioColors.Ink) },
+                            leadingIcon = { StudioIcon(sectionIcons[index]) }, onClick = {
+                                section = index
+                                activeChip = toneControls(index, safeHslIndex, safeGradeIndex, params.blackWhite).first().id
+                                showSections = false
+                            })
+                    }
+                }
             }
+            StudioIconButton(StudioSymbol.RotateCcw, if (compactHeader) "复位局部调色" else "复位全局调色", onReset)
+            if (!compactHeader) StudioIconButton(StudioSymbol.Check, "完成调色", onClose, filled = true)
         }
-        if (section == 1) {
-            TextButton(onClick = { onParamsChange(params.copy(blackWhite = !params.blackWhite)) },
-                modifier = Modifier.align(Alignment.CenterHorizontally)) {
-                Text(if (params.blackWhite) "黑白：开 · 点击切回彩色" else "黑白：关 · 点击转为黑白", color = accent)
-            }
-        }
-        if (section == 4) {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                listOf("阴影", "中间调", "高光", "全局").forEachIndexed { i, name ->
-                    TextButton(onClick = { gradeIndex = i; activeChip = "grade_hue" }) {
-                        Text(name, color = if (gradeIndex == i) accent else StudioColors.Muted)
+        if (safeSection == 2) {
+            Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+                ToneParams.HSL_COLORS.forEachIndexed { index, color ->
+                    Box(Modifier.weight(1f).height(40.dp).clip(CircleShape).clickable {
+                        hslIndex = index
+                        activeChip = toneControls(safeSection, index, safeGradeIndex, params.blackWhite).first().id
+                    }, contentAlignment = Alignment.Center) {
+                        Box(Modifier.size(22.dp).clip(CircleShape).background(Color(color))
+                            .border(if (index == safeHslIndex) 2.dp else 0.dp, accent, CircleShape))
                     }
                 }
             }
@@ -117,20 +125,47 @@ fun TonePanel(
             modifier = Modifier
                 .fillMaxWidth()
                 .horizontalScroll(chipScrollState)
-                .padding(horizontal = 12.dp, vertical = 6.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                .padding(horizontal = 12.dp, vertical = 2.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
         ) {
-            chips.forEach { chip ->
-                val selected = chip.id == active.id
-                StudioTool(parameterSymbol(chip.label), chip.label, { activeChip = chip.id },
-                    selected = selected, primary = true, modifier = Modifier.width(62.dp))
-
+            if (safeSection == 1) StudioChoice(if (params.blackWhite) "黑白" else "彩色",
+                { onParamsChange(params.copy(blackWhite = !params.blackWhite)) }, symbol = StudioSymbol.CircleOff,
+                selected = params.blackWhite)
+            if (safeSection == 4) Box {
+                StudioChoice(listOf("阴影", "中间调", "高光", "全局")[safeGradeIndex],
+                    { showGrade = true }, symbol = StudioSymbol.Aperture, selected = true, expandable = true)
+                DropdownMenu(showGrade, { showGrade = false }) {
+                    listOf("阴影", "中间调", "高光", "全局").forEachIndexed { i, name ->
+                        DropdownMenuItem(text = { Text(name) }, onClick = {
+                            gradeIndex = i; activeChip = "grade_hue"; showGrade = false
+                        })
+                    }
+                }
+            }
+            val advancedGroups = if (safeSection == 3) setOf("暗角", "颗粒") else emptySet()
+            val visibleChips = chips.filter { chip -> advancedGroups.none { chip.id.startsWith(it) && chip.id != it } }
+            visibleChips.forEach { chip ->
+                if (chip.id in advancedGroups) Box {
+                    val groupActive = active.id.startsWith(chip.id)
+                    StudioChoice(if (groupActive) active.label else chip.label, { parameterMenu = chip.id },
+                        symbol = parameterSymbol(chip.label), selected = groupActive, expandable = true)
+                    DropdownMenu(parameterMenu == chip.id, { parameterMenu = null }) {
+                        chips.filter { it.id.startsWith(chip.id) }.forEach { child ->
+                            DropdownMenuItem(text = { Text(if (child.id == chip.id) "强度" else child.label.substringAfter('·')) }, onClick = {
+                                activeChip = child.id; parameterMenu = null
+                            })
+                        }
+                    }
+                } else {
+                    val label = when (safeSection) { 2 -> chip.label.substringBefore('·'); 5 -> chip.label.substringAfter('·'); else -> chip.label }
+                    StudioChoice(label, { activeChip = chip.id }, symbol = parameterSymbol(chip.label), selected = chip.id == active.id)
+                }
             }
         }
 
         // 当前值
         Text(
-            text = "${active.label}  ${active.format(active.get(params))}",
+            text = active.format(active.get(params)) + if (active.id == "曝光") " EV" else "",
             fontSize = 20.sp,
             color = if (active.get(params) != active.default) accent else StudioColors.Ink,
             modifier = Modifier.align(Alignment.CenterHorizontally),
@@ -144,42 +179,6 @@ fun TonePanel(
             onDraggingChange = onDraggingChange,
         )
 
-        // HSL 色点选择器
-        if (section == 2) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 24.dp, vertical = 6.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-            ) {
-                ToneParams.HSL_COLORS.forEachIndexed { index, color ->
-                    Box(
-                        modifier = Modifier
-                            .size(26.dp)
-                            .clip(CircleShape)
-                            .background(Color(color))
-                            .border(
-                                width = if (index == hslIndex) 2.5.dp else 0.dp,
-                                color = accent,
-                                shape = CircleShape,
-                            )
-                            .clickable {
-                                hslIndex = index
-                                activeChip = toneControls(safeSection, index, safeGradeIndex, params.blackWhite).first().id
-                            },
-                    )
-                }
-            }
-        }
-
-
-        if (!compactHeader && onMasks != null && onExport != null) {
-            Row(Modifier.fillMaxWidth().padding(top = 4.dp), horizontalArrangement = Arrangement.SpaceEvenly) {
-                StudioTool(StudioSymbol.Palette, "调色", {}, selected = true, primary = true)
-                StudioTool(StudioSymbol.Scan, "蒙版", onMasks)
-                StudioTool(StudioSymbol.ArrowUpFromLine, "导出", onExport)
-            }
-        }
 
     }
 }
@@ -223,7 +222,7 @@ private fun DialSlider(
     Box(
         Modifier
             .fillMaxWidth()
-            .height(54.dp)
+            .height(48.dp)
             .padding(horizontal = 20.dp),
     ) {
         Canvas(
