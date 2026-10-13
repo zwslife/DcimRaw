@@ -222,6 +222,7 @@ fun PhotoPagerScreen(
             .fillMaxSize(),
     ) {
         val panelHeightLimit = maxHeight * .5f
+        val editorPanelHeight = maxHeight * .4f
         // 背景层：下滑时淡出
         Box(Modifier.fillMaxSize().background(StudioColors.Canvas.copy(alpha = 1f - dragProgress * 0.9f)))
 
@@ -405,10 +406,16 @@ fun PhotoPagerScreen(
                             onCommit = { index, part ->
                                 val layer = selectedMask
                                 if (layer != null) {
-                                    val parts = layer.components.toMutableList()
-                                    if (index in parts.indices) parts[index] = part else parts.add(part)
+                                    val parts = if (part.tool == MaskTool.BRUSH && index < 0) {
+                                        // Brush strokes share a range; retain their individual paths for rasterization.
+                                        val previous = layer.components.firstOrNull()
+                                        if (previous?.tool == MaskTool.BRUSH && previous.points.isNotEmpty()) {
+                                            listOf(previous.copy(points = previous.points + part.points,
+                                                strokeStarts = previous.strokeStarts + previous.points.size))
+                                        } else listOf(part)
+                                    } else listOf(part)
                                     onMasksChange(photo.uri, currentMasks.map { if (it.id == layer.id) layer.copy(components = parts) else it })
-                                    maskComponent = if (index in layer.components.indices) index else parts.lastIndex
+                                    maskComponent = 0
                                 }
                             }, modifier = Modifier.fillMaxSize().zIndex(1f),
                         )
@@ -517,8 +524,8 @@ fun PhotoPagerScreen(
         // 调色面板
         if (showTone && current != null) {
             val tone = toneParams[current.uri] ?: ToneParams()
-            Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth().heightIn(max = panelHeightLimit)
-                .onSizeChanged { tonePanelHeight = it.height }.verticalScroll(rememberScrollState())) {
+            Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(editorPanelHeight)
+                .onSizeChanged { tonePanelHeight = it.height }) {
                 TonePanel(
                     photoName = current.displayName,
                     params = tone,
@@ -547,8 +554,9 @@ fun PhotoPagerScreen(
                 adjusting = maskAdjusting, onAdjusting = { maskAdjusting = it },
                 onToneDragging = { toneDragging = it },
                 showOverlay = maskOverlay, onOverlay = { maskOverlay = it }, onClose = ::finishMasks,
-                modifier = Modifier.align(Alignment.BottomCenter).heightIn(max = panelHeightLimit)
-                    .onSizeChanged { maskPanelHeight = it.height }.verticalScroll(rememberScrollState()),
+                modifier = Modifier.align(Alignment.BottomCenter).height(editorPanelHeight)
+                    .onSizeChanged { maskPanelHeight = it.height },
+                thumbnail = histogramBitmap,
             )
         }
 

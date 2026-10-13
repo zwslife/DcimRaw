@@ -22,6 +22,7 @@ data class MaskComponent(
     val feather: Float = 0.7f,
     val opacity: Float = 1f,
     val rotation: Float = 0f,
+    val strokeStarts: List<Int> = emptyList(),
 )
 
 /** 在照片像素空间旋转，避免横竖照片的归一化坐标使角度变形。 */
@@ -118,8 +119,11 @@ object MaskRasterizer {
         val radius = (c.radius * min(w, h)).coerceAtLeast(0.5f)
         val feather = c.feather.coerceIn(0.001f, 1f)
         val points = c.points
-        for (index in 0 until max(1, points.size - 1)) {
-            val a = points[index]; val b = points[min(index + 1, points.lastIndex)]
+        val breaks = c.strokeStarts.toHashSet()
+        for (index in points.indices) {
+            val a = points[index]
+            val next = min(index + 1, points.lastIndex)
+            val b = if (next in breaks) a else points[next]
             val ax = a.x * w; val ay = a.y * h; val bx = b.x * w; val by = b.y * h
             val dx = bx - ax; val dy = by - ay; val d2 = dx * dx + dy * dy
             val x0 = floor(min(ax, bx) - radius).toInt().coerceIn(0, w - 1)

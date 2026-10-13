@@ -36,14 +36,17 @@ class PhotoEditStore(context: Context) {
                             MaskPoint(point.getDouble(0).toFloat(), point.getDouble(1).toFloat())
                         }, subtract = part.optBoolean("subtract"), radius = part.getDouble("radius").toFloat(),
                         feather = part.getDouble("feather").toFloat(), opacity = part.getDouble("opacity").toFloat(),
-                        rotation = part.optDouble("rotation", 0.0).toFloat())
+                        rotation = part.optDouble("rotation", 0.0).toFloat(),
+                        strokeStarts = part.optJSONArray("strokeStarts")?.let { starts ->
+                            List(starts.length()) { starts.getInt(it) }.filter { it in 1 until points.length() }
+                        }.orEmpty())
                 })
         })
     }.getOrNull()
 
     @Synchronized
     fun save(uri: String, edits: PhotoEdits) {
-        val root = JSONObject().put("version", 2).put("tone", toneJson(edits.tone))
+        val root = JSONObject().put("version", 3).put("tone", toneJson(edits.tone))
         root.put("masks", JSONArray().apply {
             edits.masks.forEach { mask -> put(JSONObject().put("id", mask.id).put("name", mask.name)
                 .put("inverted", mask.inverted).put("enabled", mask.enabled).put("tone", toneJson(mask.tone))
@@ -52,6 +55,7 @@ class PhotoEditStore(context: Context) {
                         .put("subtract", part.subtract).put("radius", part.radius.toDouble())
                         .put("feather", part.feather.toDouble()).put("opacity", part.opacity.toDouble())
                         .put("rotation", part.rotation.toDouble())
+                        .put("strokeStarts", JSONArray(part.strokeStarts))
                         .put("points", JSONArray().apply {
                             part.points.forEach { p -> put(JSONArray().put(p.x.toDouble()).put(p.y.toDouble())) }
                         })) }

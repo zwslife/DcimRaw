@@ -38,6 +38,10 @@ fun main() {
     check(alpha(brushMap, 100, 50, 10) == 0)
     val dot = brush.copy(points = listOf(MaskPoint(.5f, .5f)), radius = .12f)
     check(alpha(raster(dot), 100, 50, 50) == 255) { "Single tap should paint a dot" }
+    val separated = dot.copy(points = listOf(MaskPoint(.2f, .5f), MaskPoint(.8f, .5f)), strokeStarts = listOf(1))
+    val separatedMap = raster(separated)
+    check(alpha(separatedMap, 100, 20, 50) == 255 && alpha(separatedMap, 100, 80, 50) == 255)
+    check(alpha(separatedMap, 100, 50, 50) == 0) { "Separate strokes must not paint a connecting bridge" }
     val subtracted = raster(radial, dot.copy(subtract = true))
     check(alpha(subtracted, 100, 50, 50) == 0) { "Subtract must remove coverage" }
     check(alpha(subtracted, 100, 70, 50) > 0) { "Subtract removed unrelated coverage" }

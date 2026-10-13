@@ -42,6 +42,7 @@ enum class StudioSymbol(val resource: Int) {
     Focus(R.drawable.studio_focus),
     Check(R.drawable.studio_check),
     RotateCcw(R.drawable.studio_rotate_ccw),
+    Undo2(R.drawable.studio_undo_2),
     Scan(R.drawable.studio_scan),
     ArrowUpFromLine(R.drawable.studio_arrow_up_from_line),
     Trash2(R.drawable.studio_trash2),

@@ -31,4 +31,18 @@ fun main() {
         }
     }
     println("PASS: $combinations repeated tab/channel/mode combinations; $controls controls and endpoint round trips")
+    for (range in listOf(-2f..2f, -1f..1f, 0f..1f, .5f..3f, -180f..180f)) {
+        for (width in listOf(80f, 160f, 320f, 640f)) {
+            check(editorSliderValue(-100f, width, 10f, range) == range.start)
+            check(editorSliderValue(width + 100f, width, 10f, range) == range.endInclusive)
+            var previous = range.start
+            for (i in 0..1000) {
+                val value = editorSliderValue(10f + (width - 20f) * i / 1000f, width, 10f, range)
+                check(value >= previous && value in range) { "Slider must increase smoothly from left to right" }
+                previous = value
+            }
+            check(abs(editorSliderValue(width / 2, width, 10f, range) - (range.start + range.endInclusive) / 2) < .0001f)
+        }
+    }
+    println("PASS: slider endpoints, signed midpoint, one-way ranges and monotonic touch mapping at four widths")
 }

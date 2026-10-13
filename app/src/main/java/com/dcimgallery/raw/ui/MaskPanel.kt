@@ -1,41 +1,37 @@
 package com.dcimgallery.raw.ui
 
+import android.graphics.Bitmap
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.navigationBarsPadding
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
-import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Slider
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
+import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.drawscope.rotate
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import com.dcimgallery.raw.core.tone.MaskLayer
-import com.dcimgallery.raw.core.tone.MaskTool
-import com.dcimgallery.raw.core.tone.ToneParams
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import com.dcimgallery.raw.core.tone.*
 import java.util.UUID
 import kotlin.math.roundToInt
 
@@ -52,177 +48,172 @@ fun MaskPanel(
     adjusting: Boolean, onAdjusting: (Boolean) -> Unit,
     onToneDragging: (Boolean) -> Unit,
     showOverlay: Boolean, onOverlay: (Boolean) -> Unit, onClose: () -> Unit,
-    modifier: Modifier = Modifier,
+    modifier: Modifier = Modifier, thumbnail: Bitmap? = null,
 ) {
     val selected = layers.firstOrNull { it.id == selectedId }
-    var showNew by remember { mutableStateOf(false) }
-    var showRanges by remember { mutableStateOf(false) }
-    var showHelp by remember { mutableStateOf(false) }
-    var showMore by remember { mutableStateOf(false) }
-    var control by remember { mutableStateOf("羽化") }
-    var rename by remember { mutableStateOf<String?>(null) }
-    val accent = StudioColors.Pine
+    val sections = remember { mutableStateMapOf<String, Int>() }
+    val section = sections[selectedId] ?: -1
+    var dialog by remember { mutableStateOf<String?>(null) }
+    var rename by rememberSaveable { mutableStateOf("") }
+    val scroll = rememberScrollState()
+    val history = remember { mutableStateListOf<List<MaskLayer>>() }
+    var settled by remember { mutableStateOf(layers) }
+    var dragging by remember { mutableStateOf(false) }
+    var restoring by remember { mutableStateOf(false) }
+    // Coalesce slider movement into one undo; drawing, creation and menu actions are also undoable.
+    LaunchedEffect(layers, dragging) {
+        if (!dragging && settled != layers) {
+            if (!restoring) history.add(settled)
+            settled = layers; restoring = false
+        }
+    }
+    LaunchedEffect(selectedId, section) {
+        scroll.scrollTo(0)
+        onAdjusting(section != -1); onOverlay(section == -1); onSubtract(false)
+    }
+    LaunchedEffect(selectedId, selected?.components) {
+        val part = selected?.components?.firstOrNull()
+        onComponent(if (part == null) -1 else 0)
+        if (part != null) { onTool(part.tool); onRadius(part.radius); onFeather(part.feather); onOpacity(part.opacity) }
+    }
     fun replace(layer: MaskLayer) = onChange(layers.map { if (it.id == layer.id) layer else it })
+    fun gesture(active: Boolean) { dragging = active; onToneDragging(active) }
     fun create(chosen: MaskTool) {
-        val layer = MaskLayer(name = "蒙版 ${layers.size + 1}")
-        onChange(layers + layer); onSelect(layer.id); onTool(chosen)
-        onSubtract(false); onComponent(-1); onAdjusting(false); onOverlay(true)
-        showNew = false
+        val points = when (chosen) {
+            MaskTool.BRUSH -> emptyList()
+            MaskTool.LINEAR -> listOf(MaskPoint(.5f, .25f), MaskPoint(.5f, .75f))
+            MaskTool.RADIAL -> listOf(MaskPoint(.5f, .5f), MaskPoint(.72f, .8f))
+        }
+        val layer = MaskLayer(name = "蒙版 ${layers.size + 1}", components = listOf(
+            MaskComponent(chosen, points, radius = radius, feather = feather, opacity = opacity)))
+        onChange(layers + layer); onSelect(layer.id); onTool(chosen); onComponent(0)
+        sections[layer.id] = -1; dialog = null
     }
-    fun updatePart(value: Float, kind: Int) {
-        when (kind) { 0 -> onRadius(value); 1 -> onFeather(value); else -> onOpacity(value) }
-        if (selected != null && componentIndex in selected.components.indices) {
-            val parts = selected.components.toMutableList()
-            parts[componentIndex] = when (kind) {
-                0 -> parts[componentIndex].copy(radius = value)
-                1 -> parts[componentIndex].copy(feather = value)
-                else -> parts[componentIndex].copy(opacity = value)
-            }
-            replace(selected.copy(components = parts))
+    fun partChange(transform: (MaskComponent) -> MaskComponent) {
+        if (selected != null && selected.components.isNotEmpty()) {
+            replace(selected.copy(components = listOf(transform(selected.components.first()))))
         }
     }
-    Column(modifier.fillMaxWidth().clip(RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp))
-        .background(Color.White).navigationBarsPadding()) {
-        StudioPanelHeader("蒙版", onClose)
-        if (layers.isEmpty()) {
-            Text("选择工具，创建第一个蒙版", color = StudioColors.Muted,
-                style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp))
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                MaskTool.entries.forEach { item -> StudioTool(maskSymbol(item), item.label, { create(item) }) }
-            }
-        } else {
-            Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                Box {
-                    StudioIconButton(StudioSymbol.Plus, "新建蒙版", { showNew = true })
-                    DropdownMenu(showNew, { showNew = false }) {
-                        MaskTool.entries.forEach { item -> DropdownMenuItem(text = { Text(item.label) },
-                            leadingIcon = { StudioIcon(maskSymbol(item)) }, onClick = { create(item) }) }
-                    }
+    Box(modifier.fillMaxWidth()) {
+        PorcelainPanel {
+            PorcelainHeader(onUndo = {
+                if (history.isNotEmpty()) {
+                    val snapshot = history.removeAt(history.lastIndex)
+                    restoring = true; onChange(snapshot)
+                    if (snapshot.none { it.id == selectedId }) onSelect(snapshot.lastOrNull()?.id)
                 }
-                Row(Modifier.weight(1f).horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    layers.forEach { layer ->
-                        StudioChoice(layer.name + if (layer.enabled) "" else " · 隐藏",
-                            { onSelect(layer.id); onComponent(-1) },
-                            symbol = layer.components.firstOrNull()?.tool?.let(::maskSymbol) ?: StudioSymbol.Scan,
-                            selected = layer.id == selectedId)
-                    }
-                }
-                if (selected != null) Box {
-                    StudioIconButton(StudioSymbol.Ellipsis, "蒙版选项", { showMore = true })
-                    DropdownMenu(showMore, { showMore = false }) {
-                        DropdownMenuItem(text = { Text(if (selected.inverted) "取消反转范围" else "反转范围") },
-                            leadingIcon = { StudioIcon(StudioSymbol.FlipHorizontal) }, onClick = {
-                                replace(selected.copy(inverted = !selected.inverted)); showMore = false
-                            })
-                        DropdownMenuItem(text = { Text(if (selected.enabled) "隐藏效果" else "显示效果") },
-                            onClick = { replace(selected.copy(enabled = !selected.enabled)); showMore = false })
-                        DropdownMenuItem(text = { Text("重命名") }, onClick = { rename = selected.name; showMore = false })
-                        DropdownMenuItem(text = { Text("复制蒙版") }, leadingIcon = { StudioIcon(StudioSymbol.Copy) }, onClick = {
-                            val copy = selected.copy(id = UUID.randomUUID().toString(), name = selected.name + " 副本")
-                            onChange(layers + copy); onSelect(copy.id); onComponent(-1); showMore = false
-                        })
-                        DropdownMenuItem(text = { Text("撤销最近范围") }, enabled = selected.components.isNotEmpty(),
-                            leadingIcon = { StudioIcon(StudioSymbol.RotateCcw) }, onClick = {
-                                replace(selected.copy(components = selected.components.dropLast(1))); onComponent(-1); showMore = false
-                            })
-                        DropdownMenuItem(text = { Text("操作说明") }, leadingIcon = { StudioIcon(StudioSymbol.Info) },
-                            onClick = { showHelp = true; showMore = false })
-                        DropdownMenuItem(text = { Text("删除蒙版", color = Color(0xFFBA1A1A)) },
-                            leadingIcon = { StudioIcon(StudioSymbol.Trash2, tint = Color(0xFFBA1A1A)) }, onClick = {
-                                val remaining = layers.filterNot { it.id == selected.id }
-                                onChange(remaining); onSelect(remaining.lastOrNull()?.id); onComponent(-1); showMore = false
-                            })
-                    }
-                }
-            }
-        }
-        if (selected != null) {
-            Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
-                horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                StudioChoice("范围", { onAdjusting(false); onOverlay(true) }, Modifier.weight(1f), StudioSymbol.Scan, selected = !adjusting)
-                StudioChoice("调色", { onAdjusting(true); onOverlay(false) }, Modifier.weight(1f), StudioSymbol.Palette, selected = adjusting)
-                StudioIconButton(StudioSymbol.Layers2, if (showOverlay) "隐藏选区叠加" else "显示选区叠加",
-                    { onOverlay(!showOverlay) }, selected = showOverlay)
-            }
-            if (adjusting) {
-                TonePanel(photoName = selected.name, params = selected.tone,
-                    onParamsChange = { replace(selected.copy(tone = it)) },
-                    onReset = { replace(selected.copy(tone = ToneParams())) }, onClose = onClose,
-                    compactHeader = true, onDraggingChange = onToneDragging)
-            } else {
-                Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Box(Modifier.weight(1f)) {
-                        StudioChoice("${tool.label} · ${if (componentIndex in selected.components.indices) "范围 ${componentIndex + 1}" else "新范围"}",
-                            { showRanges = true }, symbol = maskSymbol(tool), expandable = true)
-                        DropdownMenu(showRanges, { showRanges = false }) {
-                            DropdownMenuItem(text = { Text("新建范围") }, enabled = false, onClick = {})
-                            MaskTool.entries.forEach { item ->
-                                DropdownMenuItem(text = { Text(item.label) }, leadingIcon = { StudioIcon(maskSymbol(item)) }, onClick = {
-                                    onTool(item); onComponent(-1); showRanges = false; onOverlay(true)
-                                })
-                            }
-                            if (selected.components.isNotEmpty()) {
-                                DropdownMenuItem(text = { Text("编辑已有范围") }, enabled = false, onClick = {})
-                                selected.components.forEachIndexed { index, part ->
-                                    DropdownMenuItem(text = { Text("${part.tool.label} ${index + 1} · ${if (part.subtract) "减去" else "添加"}") },
-                                        leadingIcon = { StudioIcon(maskSymbol(part.tool)) }, onClick = {
-                                            onTool(part.tool); onSubtract(part.subtract); onComponent(index)
-                                            onRadius(part.radius); onFeather(part.feather); onOpacity(part.opacity)
-                                            showRanges = false; onOverlay(true)
-                                        })
-                                }
-                            }
+            }, onDone = onClose, canUndo = history.isNotEmpty())
+            if (selected != null) EditorTabs(section, { sections[selected.id] = it }, includeRange = true)
+            Column(Modifier.weight(1f).verticalScroll(scroll).padding(horizontal = 22.dp, vertical = 12.dp)) {
+                if (layers.isNotEmpty()) {
+                    Row(Modifier.fillMaxWidth().padding(bottom = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                        EditorAction(StudioSymbol.Plus, "新建蒙版", { dialog = "create" })
+                        Row(Modifier.weight(1f).horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                            layers.forEach { layer -> MaskThumbnail(layer, layer.id == selectedId, thumbnail) { onSelect(layer.id) } }
                         }
+                        if (selected != null) EditorAction(StudioSymbol.Ellipsis, "蒙版选项", { dialog = "actions" })
                     }
-                    StudioChoice("添加", { onSubtract(false); onComponent(-1) }, symbol = StudioSymbol.Plus, selected = !subtract)
-                    StudioChoice("减去", { onSubtract(true); onComponent(-1) }, symbol = StudioSymbol.Minus, selected = subtract)
                 }
-                val radial = selected.components.getOrNull(componentIndex)?.takeIf { it.tool == MaskTool.RADIAL }
-                val controls = buildList {
-                    if (tool == MaskTool.BRUSH) add("大小")
-                    add("羽化"); add("不透明度")
-                    if (radial != null) add("旋转")
-                }
-                val activeControl = control.takeIf { it in controls } ?: "羽化"
-                Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), horizontalArrangement = Arrangement.SpaceEvenly) {
-                    controls.forEach { name -> StudioChoice(name, { control = name }, selected = activeControl == name) }
-                }
-                when (activeControl) {
-                    "大小" -> MaskSlider("大小", radius, 0.005f..0.25f) { updatePart(it, 0) }
-                    "不透明度" -> MaskSlider("不透明度", opacity, 0.05f..1f) { updatePart(it, 2) }
-                    "旋转" -> if (radial != null) MaskSlider("旋转", radial.rotation / 180f, -1f..1f, "${radial.rotation.roundToInt()}°") { value ->
-                        replace(selected.copy(components = selected.components.mapIndexed { i, part ->
-                            if (i == componentIndex) part.copy(rotation = value * 180f) else part
-                        }))
+                if (selected == null) {
+                    Column(Modifier.fillMaxWidth().padding(vertical = 12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                        StudioIcon(StudioSymbol.Scan, tint = EditorPine)
+                        Text("创建蒙版，开始局部调整", color = StudioColors.Muted, fontSize = 12.sp, modifier = Modifier.padding(12.dp))
+                        MenuAction("新建蒙版", StudioSymbol.Plus) { dialog = "create" }
                     }
-                    else -> MaskSlider("羽化", feather, 0f..1f) { updatePart(it, 1) }
+                } else if (section == -1) {
+                    val part = selected.components.firstOrNull()
+                    if (part != null) {
+                        if (part.tool == MaskTool.BRUSH) ParameterSlider("大小", "${(part.radius * 100).roundToInt()}%",
+                            part.radius, .005f.. .25f, .06f, "${selected.id}:radius",
+                            { partChange { p -> p.copy(radius = it) } }, ::gesture)
+                        ParameterSlider("羽化", "${(part.feather * 100).roundToInt()}%", part.feather, 0f..1f, .7f,
+                            "${selected.id}:feather", { partChange { p -> p.copy(feather = it) } }, ::gesture)
+                        ParameterSlider("不透明度", "${(part.opacity * 100).roundToInt()}%", part.opacity, .05f..1f, 1f,
+                            "${selected.id}:opacity", { partChange { p -> p.copy(opacity = it) } }, ::gesture)
+                        if (part.tool == MaskTool.RADIAL) ParameterSlider("旋转", "${part.rotation.roundToInt()}°",
+                            part.rotation, -180f..180f, 0f, "${selected.id}:rotation",
+                            { partChange { p -> p.copy(rotation = it) } }, ::gesture)
+                    }
+                } else ToneRows(section, selected.tone, { replace(selected.copy(tone = it)) }, selected.id, ::gesture)
+            }
+        }
+        // A custom white floating sheet stays inside the editor, with no platform menu styling.
+        if (dialog == "actions" || dialog == "create") {
+            Box(Modifier.matchParentSize().background(Color.Black.copy(alpha = .08f)).clickable { dialog = null })
+            Column(Modifier.align(Alignment.BottomCenter).padding(12.dp).fillMaxWidth()
+                .clip(RoundedCornerShape(20.dp)).background(Color.White)
+                .verticalScroll(rememberScrollState()).padding(12.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(if (dialog == "create") "新建蒙版" else selected?.name.orEmpty(), Modifier.weight(1f), color = StudioColors.Ink, fontSize = 14.sp)
+                    EditorAction(StudioSymbol.X, "关闭菜单", { dialog = null })
+                }
+                if (dialog == "create") {
+                    MaskTool.entries.forEach { item -> MenuAction(item.label, maskSymbol(item)) { create(item) } }
+                } else if (selected != null) {
+                    MenuAction(if (selected.enabled) "隐藏效果" else "显示效果", StudioSymbol.CircleOff) { replace(selected.copy(enabled = !selected.enabled)); dialog = null }
+                    MenuAction("重命名", StudioSymbol.Pencil) { rename = selected.name; dialog = "rename" }
+                    MenuAction("复制蒙版", StudioSymbol.Copy) {
+                        val copy = selected.copy(id = UUID.randomUUID().toString(), name = selected.name + " 副本")
+                        onChange(layers + copy); sections[copy.id] = section; onSelect(copy.id); dialog = null
+                    }
+                    MenuAction(if (selected.inverted) "取消反转范围" else "反转范围", StudioSymbol.FlipHorizontal) { replace(selected.copy(inverted = !selected.inverted)); dialog = null }
+                    MenuAction("删除蒙版", StudioSymbol.Trash2, danger = true) {
+                        val remaining = layers.filterNot { it.id == selected.id }
+                        onChange(remaining); onSelect(remaining.lastOrNull()?.id); dialog = null
+                    }
                 }
             }
         }
     }
-    if (showHelp) AlertDialog(onDismissRequest = { showHelp = false }, title = { Text("蒙版操作") },
-        text = { Text("先选蒙版，再进入范围或调色。\n\n范围菜单可新建画笔、线性或径向范围，也可选中已有范围继续编辑。添加与减去用于绘制新范围。\n\n单指编辑范围，双指缩放和移动照片；径向蒙版的绿色手柄用于旋转。") },
-        confirmButton = { TextButton(onClick = { showHelp = false }) { Text("知道了") } })
-    rename?.let { text ->
-        AlertDialog(onDismissRequest = { rename = null }, title = { Text("重命名蒙版") },
-            text = { OutlinedTextField(value = text, onValueChange = { rename = it }, singleLine = true) },
-            confirmButton = { TextButton(onClick = {
-                if (selected != null && text.isNotBlank()) replace(selected.copy(name = text.trim()))
-                rename = null
-            }) { Text("保存") } }, dismissButton = { TextButton(onClick = { rename = null }) { Text("取消") } })
+    if (dialog == "rename" && selected != null) Dialog(onDismissRequest = { dialog = null }) {
+        Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(Color.White).padding(20.dp)) {
+            Text("重命名蒙版", fontSize = 16.sp, color = StudioColors.Ink)
+            Spacer(Modifier.height(16.dp))
+            BasicTextField(rename, { rename = it }, singleLine = true, textStyle = TextStyle(color = StudioColors.Ink, fontSize = 16.sp),
+                modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(StudioColors.Canvas).padding(14.dp))
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                MenuAction("取消", StudioSymbol.X) { dialog = null }
+                MenuAction("保存", StudioSymbol.Check) { if (rename.isNotBlank()) replace(selected.copy(name = rename.trim())); dialog = null }
+            }
+        }
     }
 }
 
 @Composable
-private fun MaskSlider(label: String, value: Float, range: ClosedFloatingPointRange<Float>, displayValue: String? = null, onChange: (Float) -> Unit) {
-    Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text(label, color = StudioColors.Muted, style = MaterialTheme.typography.labelSmall, modifier = Modifier.width(66.dp))
-        Slider(value = value, onValueChange = onChange, valueRange = range, modifier = Modifier.weight(1f))
-        Text(displayValue ?: "${(value * 100).roundToInt()}", color = StudioColors.Ink, style = MaterialTheme.typography.labelSmall, modifier = Modifier.width(44.dp))
+private fun MenuAction(label: String, icon: StudioSymbol, danger: Boolean = false, action: () -> Unit) {
+    Row(Modifier.heightIn(min = 48.dp).clip(RoundedCornerShape(12.dp)).clickable(onClick = action).padding(horizontal = 8.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        val tint = if (danger) Color(0xFFBA1A1A) else EditorPine
+        StudioIcon(icon, Modifier.size(18.dp), tint = tint)
+        Text(label, color = if (danger) tint else StudioColors.Ink, fontSize = 13.sp)
     }
 }
 
-private fun maskSymbol(tool: MaskTool): StudioSymbol = when (tool) {
+@Composable
+private fun MaskThumbnail(layer: MaskLayer, selected: Boolean, photo: Bitmap?, onSelect: () -> Unit) {
+    Column(Modifier.width(70.dp).clip(RoundedCornerShape(12.dp))
+        .background(if (selected) Color(0xFFEFF4EB) else Color.Transparent)
+        .clickable(onClick = onSelect).semantics { this.selected = selected }.padding(vertical = 5.dp),
+        horizontalAlignment = Alignment.CenterHorizontally) {
+        Box(Modifier.size(42.dp, 38.dp).clip(RoundedCornerShape(8.dp)).background(Color(0xFF33483B))) {
+            if (photo != null && !photo.isRecycled) Image(photo.asImageBitmap(), null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+            Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = .55f)))
+            Canvas(Modifier.fillMaxSize()) {
+                val tint = Color.White.copy(alpha = if (layer.enabled) .7f else .2f)
+                when (layer.components.firstOrNull()?.tool) {
+                    MaskTool.RADIAL -> rotate(layer.components.first().rotation) { drawOval(tint, Offset(size.width * .3f, size.height * .12f), Size(size.width * .4f, size.height * .76f)) }
+                    MaskTool.LINEAR -> drawRect(tint, size = Size(size.width, size.height * .45f))
+                    else -> drawOval(tint, Offset(size.width * .12f, size.height * .4f), Size(size.width * .76f, size.height * .4f))
+                }
+            }
+        }
+        Spacer(Modifier.height(5.dp))
+        Text(layer.name, fontSize = 11.sp, color = if (selected) EditorPine else StudioColors.Muted,
+            maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(horizontal = 3.dp))
+    }
+}
+
+private fun maskSymbol(tool: MaskTool) = when (tool) {
     MaskTool.BRUSH -> StudioSymbol.Brush
     MaskTool.LINEAR -> StudioSymbol.RectangleHorizontal
     MaskTool.RADIAL -> StudioSymbol.CircleDashed
