@@ -1,6 +1,8 @@
 package com.dcimgallery.raw.ui
 
 import android.graphics.Bitmap
+import android.graphics.drawable.BitmapDrawable
+import android.content.Context
 import android.net.Uri
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
@@ -46,9 +48,11 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.produceState
@@ -73,9 +77,11 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
+import coil.request.ImageRequest
 import com.dcimgallery.raw.core.coil.Cr3Image
 import com.dcimgallery.raw.core.exif.ExifInfo
 import com.dcimgallery.raw.core.tone.ToneParams
@@ -128,6 +134,11 @@ fun PhotoPagerScreen(
     var showMasks by rememberSaveable { mutableStateOf(false) }
     var showDeleteConfirm by rememberSaveable { mutableStateOf(false) }
     var uiVisible by rememberSaveable { mutableStateOf(true) }
+    val context = LocalContext.current
+    val viewerPreferences = remember(context) { context.getSharedPreferences("photo-viewer", Context.MODE_PRIVATE) }
+    var showHistogram by rememberSaveable { mutableStateOf(viewerPreferences.getBoolean("histogram-visible", true)) }
+    var toolbarHeight by remember { mutableIntStateOf(0) }
+    val fallbackBitmaps = remember { mutableStateMapOf<String, Bitmap>() }
 
     val current = photos.getOrNull(pagerState.currentPage)
     val isCr3 = current?.source == "external"
@@ -163,6 +174,13 @@ fun PhotoPagerScreen(
     val curDecodedReady = current != null && decodedMap.containsKey(current.uri)
     val hasCurrentEdits = current?.let { !(toneParams[it.uri] ?: ToneParams()).isNeutral } == true ||
         currentMasks.any { it.enabled && !it.tone.isNeutral }
+    // Use the same edited frame as the photo, excluding the colored mask overlay.
+    val histogramBitmap = current?.let { photo ->
+        val decoded = decodedMap[photo.uri]
+        (if (hasCurrentEdits) toneFull?.takeIf { it.first == photo.uri }?.second
+            ?: tonePreview?.takeIf { it.first == photo.uri }?.second ?: decoded else decoded)
+            ?: fallbackBitmaps[photo.uri]
+    }
     LaunchedEffect(showTone, showMasks, current?.uri, curDecodedReady, hasCurrentEdits) {
         val photo = current ?: return@LaunchedEffect
         val hasTone = !(toneParams[photo.uri] ?: ToneParams()).isNeutral
@@ -223,6 +241,15 @@ fun PhotoPagerScreen(
                 val photo = photos[page]
                 val isCurrent = page == pagerState.currentPage
                 val isExternalPhoto = photo.source == "external"
+                val previewRequest = remember(photo.uri, isExternalPhoto, context) {
+                    ImageRequest.Builder(context)
+                        .data(if (isExternalPhoto) Cr3Image(Uri.parse(photo.uri)) else Uri.parse(photo.uri))
+                        .allowHardware(false)
+                        .build()
+                }
+                DisposableEffect(photo.uri) {
+                    onDispose { fallbackBitmaps.remove(photo.uri) }
+                }
                 Box(
                     Modifier
                         .fillMaxSize()
@@ -334,10 +361,9 @@ fun PhotoPagerScreen(
                     val tone = toneParams[photo.uri] ?: ToneParams()
                     // 底层：内嵌预览（始终在位）
                     AsyncImage(
-                        model = if (isExternalPhoto) {
-                            Cr3Image(Uri.parse(photo.uri))
-                        } else {
-                            Uri.parse(photo.uri)
+                        model = previewRequest,
+                        onSuccess = { state ->
+                            (state.result.drawable as? BitmapDrawable)?.bitmap?.let { fallbackBitmaps[photo.uri] = it }
                         },
                         contentDescription = photo.displayName,
                         contentScale = ContentScale.Fit,
@@ -398,6 +424,7 @@ fun PhotoPagerScreen(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
+                        .onSizeChanged { toolbarHeight = it.height }
                         .background(Color.White)
                         .statusBarsPadding()
                         .padding(horizontal = 16.dp, vertical = 10.dp),
@@ -499,6 +526,21 @@ fun PhotoPagerScreen(
                     }
                 }
             }
+        }
+
+        // Fixed in screen coordinates, so zooming/panning the image does not move the chart.
+        if ((uiVisible || showMasks) && (toolbarHeight > 0 || showMasks)) {
+            val topInset = with(LocalDensity.current) { toolbarHeight.toDp() }
+            HistogramOverlay(
+                photoKey = current?.uri, bitmap = histogramBitmap, shown = showHistogram,
+                onShownChange = {
+                    showHistogram = it
+                    viewerPreferences.edit().putBoolean("histogram-visible", it).apply()
+                },
+                modifier = Modifier.align(Alignment.TopEnd)
+                    .then(if (showMasks) Modifier.statusBarsPadding() else Modifier.padding(top = topInset))
+                    .padding(horizontal = 12.dp, vertical = 6.dp),
+            )
         }
 
         // 调色面板
