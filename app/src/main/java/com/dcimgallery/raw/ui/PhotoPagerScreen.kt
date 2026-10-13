@@ -78,6 +78,8 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
@@ -137,6 +139,10 @@ fun PhotoPagerScreen(
     val context = LocalContext.current
     val viewerPreferences = remember(context) { context.getSharedPreferences("photo-viewer", Context.MODE_PRIVATE) }
     var showHistogram by rememberSaveable { mutableStateOf(viewerPreferences.getBoolean("histogram-visible", true)) }
+    fun toggleHistogram() {
+        showHistogram = !showHistogram
+        viewerPreferences.edit().putBoolean("histogram-visible", showHistogram).apply()
+    }
     var toolbarHeight by remember { mutableIntStateOf(0) }
     val fallbackBitmaps = remember { mutableStateMapOf<String, Bitmap>() }
 
@@ -452,6 +458,8 @@ fun PhotoPagerScreen(
                         color = Color(0xFF62656B),
                     )
                     Spacer(Modifier.width(12.dp))
+                    HistogramIconButton(shown = showHistogram, onClick = ::toggleHistogram)
+                    Spacer(Modifier.width(8.dp))
                     CircleIconButton(
                         icon = Icons.Filled.Info,
                         label = "信息",
@@ -529,16 +537,18 @@ fun PhotoPagerScreen(
         }
 
         // Fixed in screen coordinates, so zooming/panning the image does not move the chart.
-        if ((uiVisible || showMasks) && (toolbarHeight > 0 || showMasks)) {
+        if (showMasks) {
+            HistogramIconButton(shown = showHistogram, onClick = ::toggleHistogram,
+                modifier = Modifier.align(Alignment.TopEnd).statusBarsPadding()
+                    .padding(horizontal = 12.dp, vertical = 6.dp))
+        }
+        if (showHistogram && (uiVisible || showMasks) && (toolbarHeight > 0 || showMasks)) {
             val topInset = with(LocalDensity.current) { toolbarHeight.toDp() }
             HistogramOverlay(
-                photoKey = current?.uri, bitmap = histogramBitmap, shown = showHistogram,
-                onShownChange = {
-                    showHistogram = it
-                    viewerPreferences.edit().putBoolean("histogram-visible", it).apply()
-                },
+                photoKey = current?.uri, bitmap = histogramBitmap,
                 modifier = Modifier.align(Alignment.TopEnd)
-                    .then(if (showMasks) Modifier.statusBarsPadding() else Modifier.padding(top = topInset))
+                    .then(if (showMasks) Modifier.statusBarsPadding().padding(top = 46.dp)
+                        else Modifier.padding(top = topInset))
                     .padding(horizontal = 12.dp, vertical = 6.dp),
             )
         }
@@ -661,10 +671,11 @@ private fun CircleIconButton(
     icon: ImageVector,
     label: String,
     onClick: () -> Unit,
+    modifier: Modifier = Modifier,
     tint: Color = Color(0xFF202124),
 ) {
     Box(
-        modifier = Modifier
+        modifier = modifier
             .size(40.dp)
             .clip(CircleShape)
             .background(Color(0xFFF2F3F5))
@@ -673,6 +684,13 @@ private fun CircleIconButton(
     ) {
         Icon(icon, contentDescription = label, tint = tint, modifier = Modifier.size(20.dp))
     }
+}
+
+@Composable
+private fun HistogramIconButton(shown: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    CircleIconButton(icon = HistogramIcon, label = if (shown) "隐藏直方图" else "显示直方图",
+        onClick = onClick, tint = if (shown) Color(0xFF237A46) else Color(0xFF202124),
+        modifier = modifier.semantics { stateDescription = if (shown) "已开启" else "已关闭" })
 }
 
 @Composable

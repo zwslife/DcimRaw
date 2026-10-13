@@ -15,7 +15,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
@@ -27,7 +26,10 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.graphics.vector.path
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
@@ -43,15 +45,15 @@ import kotlin.math.sqrt
 
 @Composable
 fun HistogramOverlay(
-    photoKey: String?, bitmap: Bitmap?, shown: Boolean, onShownChange: (Boolean) -> Unit,
+    photoKey: String?, bitmap: Bitmap?,
     modifier: Modifier = Modifier,
 ) {
     val latestBitmap by rememberUpdatedState(bitmap)
     // One background calculation at a time; keep publishing while the dial is moving.
     // The 10 Hz limit prevents analysis from competing with image rendering at 60 Hz.
-    val histogram by produceState<HistogramData?>(null, photoKey, shown) {
+    val histogram by produceState<HistogramData?>(null, photoKey) {
         value = null
-        if (shown) snapshotFlow { latestBitmap }.conflate().collect { image ->
+        snapshotFlow { latestBitmap }.conflate().collect { image ->
             value = if (image == null || image.isRecycled) null else withContext(Dispatchers.Default) {
                 val coroutine = currentCoroutineContext()
                 try {
@@ -66,22 +68,29 @@ fun HistogramOverlay(
             delay(100)
         }
     }
-    Column(modifier, horizontalAlignment = Alignment.End) {
-        TextButton(
-            onClick = { onShownChange(!shown) },
-            modifier = Modifier.clip(RoundedCornerShape(16.dp)).background(Color.White)
-                .semantics { contentDescription = if (shown) "隐藏直方图" else "显示直方图" },
-        ) {
-            Text(if (shown) "直方图：开" else "直方图：关",
-                color = if (shown) Color(0xFF237A46) else Color(0xFF62656B))
-        }
-        if (shown) HistogramCard(histogram)
-    }
+    HistogramCard(histogram, modifier)
 }
 
+internal val HistogramIcon: ImageVector = ImageVector.Builder(
+    name = "Histogram", defaultWidth = 24.dp, defaultHeight = 24.dp,
+    viewportWidth = 24f, viewportHeight = 24f,
+).apply {
+    path(fill = SolidColor(Color.Black)) {
+        moveTo(3f, 20f)
+        verticalLineTo(15f); horizontalLineTo(6f)
+        verticalLineTo(9f); horizontalLineTo(9f)
+        verticalLineTo(4f); horizontalLineTo(12f)
+        verticalLineTo(7f); horizontalLineTo(15f)
+        verticalLineTo(12f); horizontalLineTo(18f)
+        verticalLineTo(16f); horizontalLineTo(21f)
+        verticalLineTo(20f)
+        close()
+    }
+}.build()
+
 @Composable
-private fun HistogramCard(data: HistogramData?) {
-    Column(Modifier.width(208.dp).clip(RoundedCornerShape(12.dp)).background(Color.White)
+private fun HistogramCard(data: HistogramData?, modifier: Modifier = Modifier) {
+    Column(modifier.width(208.dp).clip(RoundedCornerShape(12.dp)).background(Color.White)
         .border(1.dp, Color(0xFFE1E3E6), RoundedCornerShape(12.dp)).padding(10.dp)
         .semantics { contentDescription = "整张照片的亮度和红绿蓝直方图，左侧为暗部，右侧为亮部" }) {
         if (data == null) {
