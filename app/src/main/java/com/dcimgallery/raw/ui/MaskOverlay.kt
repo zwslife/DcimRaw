@@ -191,7 +191,7 @@ fun MaskOverlay(
                     val knob = edge - Offset(0f, 24.dp.toPx())
                     drawLine(Color.White, edge, knob, 2.dp.toPx())
                     drawCircle(Color.White, 10.dp.toPx(), knob)
-                    drawCircle(Color(0xFF237A46), 8.dp.toPx(), knob)
+                    drawCircle(StudioColors.Pine, 8.dp.toPx(), knob)
                     drawArc(Color.White, 25f, 280f, false, knob - Offset(4.dp.toPx(), 4.dp.toPx()), Size(8.dp.toPx(), 8.dp.toPx()), style = Stroke(1.5.dp.toPx()))
                 }
             }

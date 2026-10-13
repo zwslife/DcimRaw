@@ -1,5 +1,7 @@
 package com.dcimgallery.raw.ui
 
+import androidx.compose.foundation.layout.*
+import androidx.compose.runtime.getValue
 import android.net.Uri
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -35,89 +37,46 @@ import com.dcimgallery.raw.R
 import com.dcimgallery.raw.core.coil.Cr3Image
 import com.dcimgallery.raw.data.db.PhotoEntity
 
-/** 主界面：按拍摄日期分组的照片网格（本机 + 外接混合，外接带来源角标）。 */
+/** 白瓷图库：按日期保留分组，第一张照片作为横幅。 */
 @Composable
 fun GridScreen(
-    items: List<GridItem>,
-    photoCount: Int,
-    gridState: LazyGridState,
-    scanning: Boolean,
-    scanFound: Int,
-    driveReadable: Boolean,
-    onRefresh: () -> Unit,
-    onChangeDir: () -> Unit,
-    onOpen: (Int) -> Unit,
+    items: List<GridItem>, photoCount: Int, gridState: LazyGridState,
+    scanning: Boolean, scanFound: Int, driveReadable: Boolean,
+    onRefresh: () -> Unit, onChangeDir: () -> Unit, onOpen: (Int) -> Unit,
 ) {
-    Column(Modifier.fillMaxSize()) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp, top = 10.dp, bottom = 6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Column(Modifier.weight(1f)) {
-                Text("CR3 相册", style = MaterialTheme.typography.titleMedium)
-                Text(
-                    text = when {
-                        scanning -> "正在扫描… 已发现 $scanFound 张"
-                        else -> "$photoCount 张"
-                    },
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            if (!driveReadable) {
-                Text(
-                    "外接盘未就绪",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = Color(0xFFE57373),
-                    modifier = Modifier.padding(end = 4.dp),
-                )
-            }
-            TextButton(onClick = onRefresh) { Text("刷新") }
-            TextButton(onClick = onChangeDir) { Text("换目录") }
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val photos = androidx.compose.runtime.remember(items) { items.filterIsInstance<GridItem.PhotoItem>().map { it.photo } }
+    val usb by androidx.compose.runtime.produceState(emptySet<String>(), photos) {
+        value = StorageOrigin.usbPhotos(context, photos)
+    }
+    Column(Modifier.fillMaxSize().background(Color.White).statusBarsPadding().navigationBarsPadding()) {
+        Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text("照片图库", Modifier.weight(1f), style = MaterialTheme.typography.headlineSmall, color = StudioColors.Ink)
+            if (scanning) androidx.compose.material3.CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+            StudioIconButton(StudioSymbol.RefreshCw, "刷新", onRefresh, enabled = !scanning)
+            StudioIconButton(StudioSymbol.FolderOpen, "选择目录", onChangeDir)
         }
-
-        when {
-            items.isEmpty() && !scanning -> Box(
-                modifier = Modifier.fillMaxWidth().weight(1f),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(
-                    text = "没有找到照片\n如需浏览外接硬盘，请连接后点「换目录」授权",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    textAlign = TextAlign.Center,
-                )
+        if (items.isEmpty()) Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                StudioIcon(StudioSymbol.Images, Modifier.size(44.dp), tint = StudioColors.Muted)
+                Text(if (scanning) "正在查找照片…" else "选择目录，开始浏览照片", Modifier.padding(top = 16.dp), color = StudioColors.Muted)
             }
-            else -> LazyVerticalGrid(
-                columns = GridCells.Adaptive(minSize = 110.dp),
-                state = gridState,
-                modifier = Modifier.fillMaxWidth().weight(1f),
-            ) {
-                items.forEach { gridItem ->
-                    when (gridItem) {
-                        is GridItem.Header -> item(
-                            key = "header_${gridItem.date}",
-                            span = { GridItemSpan(maxLineSpan) },
-                            contentType = "header",
-                        ) {
-                            Text(
-                                text = gridItem.label,
-                                style = MaterialTheme.typography.titleSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .background(MaterialTheme.colorScheme.background)
-                                    .padding(horizontal = 16.dp, vertical = 8.dp),
-                            )
+        } else LazyVerticalGrid(columns = GridCells.Fixed(2), state = gridState,
+            modifier = Modifier.fillMaxWidth().weight(1f), contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 20.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            var indexInGroup = 0
+            items.forEach { item ->
+                when (item) {
+                    is GridItem.Header -> {
+                        indexInGroup = 0
+                        item(key = "header_${item.date}", span = { GridItemSpan(maxLineSpan) }) {
+                            Text(item.label, Modifier.padding(top = 8.dp, bottom = 2.dp), style = MaterialTheme.typography.labelMedium, color = StudioColors.Muted)
                         }
-                        is GridItem.PhotoItem -> item(
-                            key = gridItem.photo.uri,
-                            contentType = "photo",
-                        ) {
-                            GridCell(
-                                photo = gridItem.photo,
-                                onClick = { onOpen(gridItem.globalIndex) },
-                            )
+                    }
+                    is GridItem.PhotoItem -> {
+                        val wide = indexInGroup++ == 0
+                        item(key = item.photo.uri, span = { GridItemSpan(if (wide) 2 else 1) }) {
+                            GridCell(item.photo, wide, item.photo.uri in usb) { onOpen(item.globalIndex) }
                         }
                     }
                 }
@@ -127,39 +86,18 @@ fun GridScreen(
 }
 
 @Composable
-private fun GridCell(photo: PhotoEntity, onClick: () -> Unit) {
-    Box(
-        modifier = Modifier
-            .aspectRatio(1f)
-            .padding(1.dp)
-            .clip(RoundedCornerShape(2.dp))
-            .background(Color(0xFF1A1A1C))
-            .clickable(onClick = onClick),
-    ) {
-        val isExternal = photo.source == "external"
-        AsyncImage(
-            model = if (isExternal) Cr3Image(Uri.parse(photo.uri)) else Uri.parse(photo.uri),
-            contentDescription = photo.displayName,
-            contentScale = ContentScale.Crop,
-            modifier = Modifier.fillMaxSize(),
-        )
-        if (isExternal) {
-            Box(
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .padding(4.dp)
-                    .size(16.dp)
-                    .clip(RoundedCornerShape(4.dp))
-                    .background(Color(0x99000000)),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(
-                    painter = painterResource(R.drawable.ic_sd_card),
-                    contentDescription = "外接存储",
-                    tint = Color.White,
-                    modifier = Modifier.size(11.dp),
-                )
-            }
+private fun GridCell(photo: PhotoEntity, wide: Boolean, usb: Boolean, onClick: () -> Unit) {
+    Box(Modifier.aspectRatio(if (wide) 1.5f else 1f).clip(RoundedCornerShape(12.dp))
+        .background(StudioColors.Canvas).clickable(onClick = onClick)) {
+        val raw = photo.source == "external"
+        AsyncImage(model = if (raw) Cr3Image(Uri.parse(photo.uri)) else Uri.parse(photo.uri), contentDescription = photo.displayName,
+            contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+        if (raw) Text("RAW", Modifier.align(Alignment.BottomStart).padding(10.dp)
+            .clip(RoundedCornerShape(4.dp)).background(Color.White.copy(alpha = .9f)).padding(horizontal = 6.dp, vertical = 2.dp),
+            style = MaterialTheme.typography.labelSmall, color = StudioColors.Ink)
+        if (usb) Box(Modifier.align(Alignment.BottomEnd).padding(10.dp).size(28.dp).clip(RoundedCornerShape(6.dp))
+            .background(Color.White.copy(alpha = .9f)), contentAlignment = Alignment.Center) {
+            StudioIcon(StudioSymbol.HardDrive, Modifier.size(18.dp), label = "OTG 存储")
         }
     }
 }

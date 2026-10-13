@@ -27,21 +27,19 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.Share
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.Button
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -69,7 +67,6 @@ import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.PointerId
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.util.VelocityTracker
@@ -131,6 +128,11 @@ fun PhotoPagerScreen(
     )
     val scope = rememberCoroutineScope()
     val gestureState = remember { PagerGestureState() }
+    var showMore by remember { mutableStateOf(false) }
+    var showExport by rememberSaveable { mutableStateOf(false) }
+    var tonePanelHeight by remember { mutableIntStateOf(0) }
+    var dockHeight by remember { mutableIntStateOf(0) }
+    var infoHeight by remember { mutableIntStateOf(0) }
     var showInfo by rememberSaveable { mutableStateOf(false) }
     var showTone by rememberSaveable { mutableStateOf(false) }
     var showMasks by rememberSaveable { mutableStateOf(false) }
@@ -148,6 +150,7 @@ fun PhotoPagerScreen(
 
     val current = photos.getOrNull(pagerState.currentPage)
     val isCr3 = current?.source == "external"
+    val usbPhotos by produceState(emptySet<String>(), photos) { value = StorageOrigin.usbPhotos(context, photos) }
     val currentMasks = current?.let { masks[it.uri] }.orEmpty()
     var selectedMaskId by rememberSaveable(current?.uri) { mutableStateOf<String?>(null) }
     var maskTool by rememberSaveable { mutableStateOf(MaskTool.BRUSH) }
@@ -163,7 +166,10 @@ fun PhotoPagerScreen(
     val maskPanelDp = with(LocalDensity.current) { maskPanelHeight.toDp() }
     val selectedMask = currentMasks.firstOrNull { it.id == selectedMaskId }
     fun finishMasks() { showMasks = false; gestureState.reset(); current?.let(onTonePanelDone) }
-    BackHandler { if (showMasks) finishMasks() else onClose() }
+    BackHandler {
+        when { showMasks -> finishMasks(); showExport -> showExport = false; showInfo -> showInfo = false
+            showTone -> { showTone = false; current?.let(onTonePanelDone) }; else -> onClose() }
+    }
     LaunchedEffect(current?.uri, currentMasks.map { it.id }) {
         if (currentMasks.none { it.id == selectedMaskId }) selectedMaskId = currentMasks.lastOrNull()?.id
     }
@@ -211,13 +217,13 @@ fun PhotoPagerScreen(
     val viewH = gestureState.viewSize.height.toFloat().coerceAtLeast(1f)
     val dragProgress = (abs(gestureState.dragY) / (viewH * 0.6f)).coerceIn(0f, 1f)
 
-    Box(
+    BoxWithConstraints(
         Modifier
-            .fillMaxSize()
-            .onSizeChanged { gestureState.viewSize = it },
+            .fillMaxSize(),
     ) {
+        val panelHeightLimit = maxHeight * .6f
         // 背景层：下滑时淡出
-        Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 1f - dragProgress * 0.9f)))
+        Box(Modifier.fillMaxSize().background(StudioColors.Canvas.copy(alpha = 1f - dragProgress * 0.9f)))
 
         // 内容层：下滑跟随位移 + 轻微缩小；未缩放时探测垂直关闭手势
         Box(
@@ -259,7 +265,11 @@ fun PhotoPagerScreen(
                 Box(
                     Modifier
                         .fillMaxSize()
-                        .padding(if (showMasks) PaddingValues(bottom = maskPanelDp) else PaddingValues(0.dp))
+                        .padding(with(LocalDensity.current) {
+                            PaddingValues(top = if (uiVisible || showMasks) toolbarHeight.toDp() else 0.dp,
+                                bottom = when { showMasks -> maskPanelDp; showTone -> tonePanelHeight.toDp()
+                                    showInfo -> infoHeight.toDp(); uiVisible && isCr3 -> dockHeight.toDp(); else -> 0.dp })
+                        })
                         .onSizeChanged { if (isCurrent) gestureState.viewSize = it }
                         // 图片与蒙版在同一个 graphicsLayer 内缩放；由父层在 Initial pass
                         // 统一识别双指手势，单指交给蒙版绘制或未缩放时的 Pager。
@@ -422,7 +432,7 @@ fun PhotoPagerScreen(
 
             // 顶栏：圆形返回 + 标题 + 圆形信息（单击图片渐隐渐出）
             AnimatedVisibility(
-                visible = uiVisible && !showMasks,
+                visible = uiVisible || showMasks,
                 enter = fadeIn(),
                 exit = fadeOut(),
                 modifier = Modifier.align(Alignment.TopCenter),
@@ -433,42 +443,42 @@ fun PhotoPagerScreen(
                         .onSizeChanged { toolbarHeight = it.height }
                         .background(Color.White)
                         .statusBarsPadding()
-                        .padding(horizontal = 16.dp, vertical = 10.dp),
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    CircleIconButton(icon = Icons.AutoMirrored.Filled.ArrowBack, label = "返回", onClick = onClose)
-                    Spacer(Modifier.width(14.dp))
+                    StudioIconButton(StudioSymbol.ArrowLeft, "返回", { if (showMasks) finishMasks() else onClose() })
+                    Spacer(Modifier.width(6.dp))
                     Column(Modifier.weight(1f)) {
                         Text(
                             text = current?.displayName.orEmpty(),
                             style = MaterialTheme.typography.bodyMedium,
-                            color = Color(0xFF202124),
+                            color = StudioColors.Ink,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
                         Text(
-                            text = current?.let { formatTaken(it.takenAt) }.orEmpty(),
+                            text = "${if (isCr3) "RAW · " else ""}${pagerState.currentPage + 1} / ${photos.size}",
                             style = MaterialTheme.typography.bodySmall,
-                            color = Color(0xFF62656B),
+                            color = StudioColors.Muted,
                         )
                     }
-                    Text(
-                        text = "${pagerState.currentPage + 1} / ${photos.size}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = Color(0xFF62656B),
-                    )
-                    Spacer(Modifier.width(12.dp))
                     HistogramIconButton(shown = showHistogram, onClick = ::toggleHistogram)
-                    Spacer(Modifier.width(8.dp))
-                    CircleIconButton(
-                        icon = Icons.Filled.Info,
-                        label = "信息",
-                        tint = if (showInfo) Color(0xFF237A46) else Color(0xFF202124),
-                        onClick = {
-                            showInfo = !showInfo
-                            if (showInfo) showTone = false
-                        },
-                    )
+                    StudioIconButton(StudioSymbol.Info, "信息", {
+                        showInfo = !showInfo
+                        if (showInfo) { showTone = false; if (showMasks) finishMasks() }
+                    }, selected = showInfo)
+                    Box {
+                        StudioIconButton(StudioSymbol.Ellipsis, "更多", { showMore = true })
+                        DropdownMenu(showMore, { showMore = false }) {
+                            if (isCr3) {
+                                DropdownMenuItem(text = { Text("复位全局调色") }, leadingIcon = { StudioIcon(StudioSymbol.RotateCcw) },
+                                    onClick = { current?.let { onToneChange(it.uri, ToneParams()) }; showMore = false })
+                                DropdownMenuItem(text = { Text("删除原片", color = Color(0xFFBA1A1A)) },
+                                    leadingIcon = { StudioIcon(StudioSymbol.Trash2, tint = Color(0xFFBA1A1A)) },
+                                    onClick = { showMore = false; showDeleteConfirm = true })
+                            } else DropdownMenuItem(text = { Text("照片信息") }, onClick = { showMore = false; showInfo = true })
+                        }
+                    }
                 }
             }
 
@@ -479,76 +489,27 @@ fun PhotoPagerScreen(
                 exit = fadeOut(),
                 modifier = Modifier.align(Alignment.BottomCenter),
             ) {
-                Row(
-                    modifier = Modifier
-                        .navigationBarsPadding()
-                        .padding(bottom = 18.dp)
-                        .clip(RoundedCornerShape(28.dp))
-                        .background(Color.White)
-                        .padding(horizontal = 10.dp, vertical = 2.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    TextButton(
-                        onClick = {
-                            showTone = true
-                            showInfo = false
-                        },
-                    ) {
-                        Icon(Icons.Filled.Edit, contentDescription = null, modifier = Modifier.size(17.dp))
-                        Spacer(Modifier.width(5.dp))
-                        Text("调色")
-                    }
-                    TextButton(enabled = curDecodedReady, onClick = {
+                Row(Modifier.fillMaxWidth().onSizeChanged { dockHeight = it.height }
+                    .background(Color.White).navigationBarsPadding().padding(horizontal = 36.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
+                    StudioTool(StudioSymbol.Palette, "调色", { showTone = true; showInfo = false }, selected = true, primary = true)
+                    StudioTool(StudioSymbol.Scan, "蒙版", {
                         gestureState.reset(); showMasks = true; showTone = false; showInfo = false
                         maskAdjusting = false; maskOverlay = true; maskComponent = -1
-                    }) { Text("◌ 蒙版") }
-                    Box(
-                        Modifier
-                            .height(20.dp)
-                            .width(1.dp)
-                            .background(Color(0xFFE1E3E6)),
-                    )
-                    TextButton(
-                        onClick = { current?.let(onExport) },
-                        enabled = current != null && !exporting,
-                    ) {
-                        Icon(Icons.Filled.Share, contentDescription = null, modifier = Modifier.size(17.dp))
-                        Spacer(Modifier.width(5.dp))
-                        Text(if (exporting) "导出中…" else "导出")
-                    }
-                    Box(
-                        Modifier
-                            .height(20.dp)
-                            .width(1.dp)
-                            .background(Color(0xFFE1E3E6)),
-                    )
-                    TextButton(onClick = { if (current != null) showDeleteConfirm = true }) {
-                        Icon(
-                            Icons.Filled.Delete,
-                            contentDescription = null,
-                            tint = Color(0xFFBA1A1A),
-                            modifier = Modifier.size(17.dp),
-                        )
-                        Spacer(Modifier.width(5.dp))
-                        Text("删除", color = Color(0xFFBA1A1A))
-                    }
+                    }, enabled = curDecodedReady)
+                    StudioTool(StudioSymbol.ArrowUpFromLine, if (exporting) "导出中…" else "导出",
+                        { showExport = true }, enabled = current != null && !exporting)
                 }
             }
         }
 
         // Fixed in screen coordinates, so zooming/panning the image does not move the chart.
-        if (showMasks) {
-            HistogramIconButton(shown = showHistogram, onClick = ::toggleHistogram,
-                modifier = Modifier.align(Alignment.TopEnd).statusBarsPadding()
-                    .padding(horizontal = 12.dp, vertical = 6.dp))
-        }
         if (showHistogram && (uiVisible || showMasks) && (toolbarHeight > 0 || showMasks)) {
             val topInset = with(LocalDensity.current) { toolbarHeight.toDp() }
             HistogramOverlay(
                 photoKey = current?.uri, bitmap = histogramBitmap,
                 modifier = Modifier.align(Alignment.TopEnd)
-                    .then(if (showMasks) Modifier.statusBarsPadding().padding(top = 46.dp)
-                        else Modifier.padding(top = topInset))
+                    .padding(top = topInset)
                     .padding(horizontal = 12.dp, vertical = 6.dp),
             )
         }
@@ -556,8 +517,11 @@ fun PhotoPagerScreen(
         // 调色面板
         if (showTone && current != null) {
             val tone = toneParams[current.uri] ?: ToneParams()
-            Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth()) {
+            Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth().heightIn(max = panelHeightLimit)
+                .onSizeChanged { tonePanelHeight = it.height }.verticalScroll(rememberScrollState())) {
                 TonePanel(
+                    onMasks = { gestureState.reset(); showTone = false; showMasks = true; maskAdjusting = false; maskOverlay = true },
+                    onExport = { showExport = true },
                     photoName = current.displayName,
                     params = tone,
                     onParamsChange = { onToneChange(current.uri, it) },
@@ -585,7 +549,9 @@ fun PhotoPagerScreen(
                 adjusting = maskAdjusting, onAdjusting = { maskAdjusting = it },
                 onToneDragging = { toneDragging = it },
                 showOverlay = maskOverlay, onOverlay = { maskOverlay = it }, onClose = ::finishMasks,
-                modifier = Modifier.align(Alignment.BottomCenter).onSizeChanged { maskPanelHeight = it.height },
+                modifier = Modifier.align(Alignment.BottomCenter).heightIn(max = panelHeightLimit)
+                    .onSizeChanged { maskPanelHeight = it.height }.verticalScroll(rememberScrollState()),
+                onGlobalTone = { finishMasks(); showTone = true }, onExport = { showExport = true },
             )
         }
 
@@ -598,25 +564,31 @@ fun PhotoPagerScreen(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .fillMaxWidth()
+                    .heightIn(max = panelHeightLimit).onSizeChanged { infoHeight = it.height }
+                    .clip(RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp))
                     .background(Color.White)
                     .navigationBarsPadding()
                     .verticalScroll(rememberScrollState())
                     .padding(horizontal = 20.dp, vertical = 16.dp),
             ) {
-                Text(current.displayName, style = MaterialTheme.typography.titleSmall, color = Color(0xFF202124))
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text("照片信息", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
+                    StudioIconButton(StudioSymbol.X, "关闭信息", { showInfo = false })
+                }
+                Text(current.displayName, style = MaterialTheme.typography.titleSmall, color = StudioColors.Ink)
                 Text(
                     text = buildString {
                         if (current.folder.isNotEmpty()) append(current.folder).append(" · ")
                         append(String.format(Locale.US, "%.1f MB", current.sizeBytes / 1048576f))
-                        if (isCr3) append(" · 外接存储") else append(" · 本机存储")
+                        if (current.uri in usbPhotos) append(" · OTG 存储")
                     },
                     style = MaterialTheme.typography.bodySmall,
-                    color = Color(0xFF62656B),
+                    color = StudioColors.Muted,
                 )
                 Spacer(Modifier.height(12.dp))
                 val info = exif
                 if (info == null) {
-                    Text("读取中…", style = MaterialTheme.typography.bodyMedium, color = Color(0xFF62656B))
+                    Text("读取中…", style = MaterialTheme.typography.bodyMedium, color = StudioColors.Muted)
                 } else {
                     ExifRow("拍摄时间", info.dateTimeText)
                     ExifRow("相机", info.camera)
@@ -635,6 +607,23 @@ fun PhotoPagerScreen(
             }
         }
 
+        if (showExport && current != null) {
+            AlertDialog(onDismissRequest = { showExport = false }, containerColor = Color.White,
+                icon = { StudioIcon(StudioSymbol.ArrowUpFromLine, tint = StudioColors.Pine) },
+                title = { Text("导出照片") },
+                text = {
+                    Column {
+                        Text(current.displayName, style = MaterialTheme.typography.titleSmall)
+                        Spacer(Modifier.height(20.dp))
+                        ExifRow("格式", "JPEG")
+                        ExifRow("尺寸", "原始尺寸")
+                        ExifRow("调整", "全局调色与蒙版")
+                    }
+                },
+                confirmButton = { Button(onClick = { showExport = false; onExport(current) }) { Text("导出到相册") } },
+                dismissButton = { TextButton(onClick = { showExport = false }) { Text("取消") } })
+        }
+
         // 删除二次确认
         if (showDeleteConfirm && current != null) {
             AlertDialog(
@@ -642,7 +631,7 @@ fun PhotoPagerScreen(
                 title = { Text("删除原片") },
                 text = {
                     Text(
-                        "将从外接硬盘永久删除 ${current.displayName}" +
+                        "将永久删除 ${current.displayName}" +
                             "（${String.format(Locale.US, "%.1f", current.sizeBytes / 1048576f)} MB）。\n\n" +
                             "此操作不可恢复，相机的原始 RAW 文件将被彻底移除。",
                     )
@@ -665,32 +654,10 @@ fun PhotoPagerScreen(
     }
 }
 
-/** 顶栏圆形图标按钮（参考微信预览的返回/信息按钮）。 */
-@Composable
-private fun CircleIconButton(
-    icon: ImageVector,
-    label: String,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-    tint: Color = Color(0xFF202124),
-) {
-    Box(
-        modifier = modifier
-            .size(40.dp)
-            .clip(CircleShape)
-            .background(Color(0xFFF2F3F5))
-            .clickable(onClick = onClick),
-        contentAlignment = Alignment.Center,
-    ) {
-        Icon(icon, contentDescription = label, tint = tint, modifier = Modifier.size(20.dp))
-    }
-}
-
 @Composable
 private fun HistogramIconButton(shown: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
-    CircleIconButton(icon = HistogramIcon, label = if (shown) "隐藏直方图" else "显示直方图",
-        onClick = onClick, tint = if (shown) Color(0xFF237A46) else Color(0xFF202124),
-        modifier = modifier.semantics { stateDescription = if (shown) "已开启" else "已关闭" })
+    StudioIconButton(StudioSymbol.ChartNoAxesColumn, if (shown) "隐藏直方图" else "显示直方图", onClick,
+        modifier = modifier.semantics { stateDescription = if (shown) "已开启" else "已关闭" }, selected = shown)
 }
 
 @Composable
@@ -700,13 +667,13 @@ private fun ExifRow(label: String, value: String?) {
         Text(
             text = label,
             style = MaterialTheme.typography.bodyMedium,
-            color = Color(0xFF62656B),
+            color = StudioColors.Muted,
             modifier = Modifier.fillMaxWidth(0.28f),
         )
         Text(
             text = value,
             style = MaterialTheme.typography.bodyMedium,
-            color = Color(0xFF202124),
+            color = StudioColors.Ink,
             modifier = Modifier.weight(1f),
         )
     }

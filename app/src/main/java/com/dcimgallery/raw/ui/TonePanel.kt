@@ -40,6 +40,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.dcimgallery.raw.core.tone.HslAdjust
 import com.dcimgallery.raw.core.tone.ColorGrade
 import com.dcimgallery.raw.core.tone.ToneParams
@@ -59,6 +60,8 @@ fun TonePanel(
     onReset: () -> Unit,
     onClose: () -> Unit,
     compactHeader: Boolean = false,
+    onMasks: (() -> Unit)? = null,
+    onExport: (() -> Unit)? = null,
     onDraggingChange: (Boolean) -> Unit = {},
 ) {
     var section by rememberSaveable { mutableIntStateOf(0) }
@@ -68,39 +71,25 @@ fun TonePanel(
 
     val chips = rememberChips(section, hslIndex, gradeIndex, params.blackWhite)
     val active = chips.firstOrNull { it.id == activeChip } ?: chips.first()
-    val accent = Color(0xFF237A46)
-
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(Color.White)
-            .navigationBarsPadding(),
-    ) {
-        // 头部：分区标签 + 复位/完成
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 2.dp),
-        ) {
-            Row(Modifier.weight(1f).horizontalScroll(rememberScrollState())) {
-                listOf("曝光", "色彩", if (params.blackWhite) "黑白混色" else "HSL", "效果", "分级", "细节").forEachIndexed { index, name ->
-                    TextButton(
-                        onClick = {
-                            section = index
-                            activeChip = rememberChips(index, hslIndex, gradeIndex, params.blackWhite).first().id
-                        },
-                    ) {
-                        Text(
-                            text = name,
-                            color = if (section == index) accent else Color(0xFF62656B),
-                            style = MaterialTheme.typography.bodyMedium,
-                        )
-                    }
-                }
-            }
-            TextButton(onClick = onReset) { Text("复位") }
-            if (!compactHeader) TextButton(onClick = onClose) { Text("完成", color = accent) }
+    val accent = StudioColors.Pine
+    val sections = listOf("光线", "色彩", "混色", "效果", "分级", "细节")
+    val sectionIcons = listOf(StudioSymbol.Sun, StudioSymbol.Palette, StudioSymbol.CircleDot,
+        StudioSymbol.Sparkles, StudioSymbol.Aperture, StudioSymbol.Focus)
+    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp))
+        .background(Color.White).then(if (compactHeader) Modifier else Modifier.navigationBarsPadding())) {
+        if (!compactHeader) StudioPanelHeader("${sections[section]} · 全局调整", onClose, onReset)
+        else Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text("局部调整", Modifier.weight(1f).padding(start = 20.dp), style = MaterialTheme.typography.labelMedium)
+            StudioIconButton(StudioSymbol.RotateCcw, "复位局部调色", onReset)
         }
-
+        Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp)) {
+            sections.forEachIndexed { index, name ->
+                StudioTool(sectionIcons[index], name, {
+                    section = index
+                    activeChip = rememberChips(index, hslIndex, gradeIndex, params.blackWhite).first().id
+                }, modifier = Modifier.weight(1f), selected = section == index)
+            }
+        }
         if (section == 1) {
             TextButton(onClick = { onParamsChange(params.copy(blackWhite = !params.blackWhite)) },
                 modifier = Modifier.align(Alignment.CenterHorizontally)) {
@@ -111,17 +100,34 @@ fun TonePanel(
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
                 listOf("阴影", "中间调", "高光", "全局").forEachIndexed { i, name ->
                     TextButton(onClick = { gradeIndex = i; activeChip = "grade_hue" }) {
-                        Text(name, color = if (gradeIndex == i) accent else Color(0xFF62656B))
+                        Text(name, color = if (gradeIndex == i) accent else StudioColors.Muted)
                     }
                 }
+            }
+        }
+
+        // 参数卡片（横向滚动）
+        val chipScrollState = key(section) { rememberScrollState() }
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(chipScrollState)
+                .padding(horizontal = 12.dp, vertical = 6.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            chips.forEach { chip ->
+                val selected = chip.id == active.id
+                StudioTool(parameterSymbol(chip.label), chip.label, { activeChip = chip.id },
+                    selected = selected, primary = true, modifier = Modifier.width(62.dp))
+
             }
         }
 
         // 当前值
         Text(
             text = "${active.label}  ${active.format(active.get(params))}",
-            style = MaterialTheme.typography.titleSmall,
-            color = if (active.get(params) != active.default) accent else Color(0xFF202124),
+            fontSize = 20.sp,
+            color = if (active.get(params) != active.default) accent else StudioColors.Ink,
             modifier = Modifier.align(Alignment.CenterHorizontally),
         )
 
@@ -165,44 +171,34 @@ fun TonePanel(
             }
         }
 
-        // 参数卡片（横向滚动）
-        val chipScrollState = key(section) { rememberScrollState() }
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .horizontalScroll(chipScrollState)
-                .padding(horizontal = 12.dp, vertical = 6.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            chips.forEach { chip ->
-                val selected = chip.id == active.id
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(if (selected) Color(0xFFE8F3EB) else Color(0xFFF5F6F7))
-                        .border(
-                            width = 1.dp,
-                            color = if (selected) accent else Color(0xFFD9DCE1),
-                            shape = RoundedCornerShape(10.dp),
-                        )
-                        .clickable { activeChip = chip.id }
-                        .padding(horizontal = 14.dp, vertical = 7.dp),
-                ) {
-                    Text(
-                        text = chip.label,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = if (selected) accent else Color(0xFF62656B),
-                    )
-                    Text(
-                        text = chip.format(chip.get(params)),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = if (chip.get(params) != chip.default) Color(0xFF202124) else Color(0xFF6E6E73),
-                    )
-                }
+
+        if (!compactHeader && onMasks != null && onExport != null) {
+            Row(Modifier.fillMaxWidth().padding(top = 4.dp), horizontalArrangement = Arrangement.SpaceEvenly) {
+                StudioTool(StudioSymbol.Palette, "调色", {}, selected = true, primary = true)
+                StudioTool(StudioSymbol.Scan, "蒙版", onMasks)
+                StudioTool(StudioSymbol.ArrowUpFromLine, "导出", onExport)
             }
         }
+
     }
+}
+
+private fun parameterSymbol(label: String): StudioSymbol = when (label) {
+    "曝光" -> StudioSymbol.Sun
+    "对比度" -> StudioSymbol.Contrast
+    "高光" -> StudioSymbol.SunMedium
+    "阴影" -> StudioSymbol.Eclipse
+    "白色", "黑色" -> StudioSymbol.Circle
+    "色温" -> StudioSymbol.Thermometer
+    "色调", "色相" -> StudioSymbol.Pipette
+    "饱和度" -> StudioSymbol.Droplets
+    "自然饱和度" -> StudioSymbol.Flower2
+    "清晰度", "纹理" -> StudioSymbol.Grip
+    "去除薄雾" -> StudioSymbol.SunDim
+    "暗角" -> StudioSymbol.Frame
+    "锐化" -> StudioSymbol.Focus
+    "颗粒" -> StudioSymbol.CircleDot
+    else -> StudioSymbol.Scale
 }
 
 // ---- 参数定义 ----

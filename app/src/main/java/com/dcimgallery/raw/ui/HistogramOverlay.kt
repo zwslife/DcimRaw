@@ -26,10 +26,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.graphics.vector.path
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
@@ -71,34 +68,17 @@ fun HistogramOverlay(
     HistogramCard(histogram, modifier)
 }
 
-internal val HistogramIcon: ImageVector = ImageVector.Builder(
-    name = "Histogram", defaultWidth = 24.dp, defaultHeight = 24.dp,
-    viewportWidth = 24f, viewportHeight = 24f,
-).apply {
-    path(fill = SolidColor(Color.Black)) {
-        moveTo(3f, 20f)
-        verticalLineTo(15f); horizontalLineTo(6f)
-        verticalLineTo(9f); horizontalLineTo(9f)
-        verticalLineTo(4f); horizontalLineTo(12f)
-        verticalLineTo(7f); horizontalLineTo(15f)
-        verticalLineTo(12f); horizontalLineTo(18f)
-        verticalLineTo(16f); horizontalLineTo(21f)
-        verticalLineTo(20f)
-        close()
-    }
-}.build()
-
 @Composable
 private fun HistogramCard(data: HistogramData?, modifier: Modifier = Modifier) {
-    Column(modifier.width(208.dp).clip(RoundedCornerShape(12.dp)).background(Color.White)
-        .border(1.dp, Color(0xFFE1E3E6), RoundedCornerShape(12.dp)).padding(10.dp)
+    Column(modifier.width(144.dp).clip(RoundedCornerShape(12.dp)).background(Color.White)
+        .border(1.dp, Color(0xFFE1E3E6), RoundedCornerShape(12.dp)).padding(8.dp)
         .semantics { contentDescription = "整张照片的亮度和红绿蓝直方图，左侧为暗部，右侧为亮部" }) {
         if (data == null) {
-            Box(Modifier.fillMaxWidth().height(80.dp), contentAlignment = Alignment.Center) {
-                Text("读取中…", color = Color(0xFF62656B), style = MaterialTheme.typography.bodySmall)
+            Box(Modifier.fillMaxWidth().height(46.dp), contentAlignment = Alignment.Center) {
+                Text("读取中…", color = StudioColors.Muted, style = MaterialTheme.typography.bodySmall)
             }
         } else {
-            Canvas(Modifier.fillMaxWidth().height(80.dp)) {
+            Canvas(Modifier.fillMaxWidth().height(46.dp)) {
                 val baseline = size.height - 1.dp.toPx()
                 for (i in 1..3) {
                     val x = size.width * i / 4f
@@ -125,14 +105,14 @@ private fun HistogramCard(data: HistogramData?, modifier: Modifier = Modifier) {
             }
         }
         Row(Modifier.fillMaxWidth().padding(top = 3.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text("0", color = Color(0xFF62656B), style = MaterialTheme.typography.labelSmall)
+            Text("0", color = StudioColors.Muted, style = MaterialTheme.typography.labelSmall)
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 listOf("亮度" to Color(0xFF737981), "R" to Color(0xFFC84343),
                     "G" to Color(0xFF28834D), "B" to Color(0xFF367AC7)).forEach { (label, color) ->
                     Text(label, color = color, style = MaterialTheme.typography.labelSmall)
                 }
             }
-            Text("255", color = Color(0xFF62656B), style = MaterialTheme.typography.labelSmall)
+            Text("255", color = StudioColors.Muted, style = MaterialTheme.typography.labelSmall)
         }
     }
 }

@@ -27,7 +27,8 @@ fun PermissionScreen(
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Text("CR3 相册", style = MaterialTheme.typography.headlineMedium)
+        StudioIcon(StudioSymbol.Images, modifier = Modifier.padding(bottom = 24.dp), tint = StudioColors.Pine)
+        Text("照片图库", style = MaterialTheme.typography.headlineMedium)
         Spacer(Modifier.height(20.dp))
         Text(
             "默认读取本机相册目录（DCIM / Pictures）。\n\n" +
@@ -40,11 +41,13 @@ fun PermissionScreen(
         )
         Spacer(Modifier.height(28.dp))
         Button(onClick = onGrantLocal) {
-            Text("读取本机照片")
+            StudioIcon(StudioSymbol.Images, tint = androidx.compose.ui.graphics.Color.White)
+            Text("读取本机照片", Modifier.padding(start = 10.dp))
         }
         Spacer(Modifier.height(12.dp))
         OutlinedButton(onClick = onPickDirectory) {
-            Text("授权外接硬盘目录")
+            StudioIcon(StudioSymbol.FolderOpen)
+            Text("选择照片目录", Modifier.padding(start = 10.dp))
         }
     }
 }

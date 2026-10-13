@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
@@ -52,12 +53,15 @@ fun MaskPanel(
     onToneDragging: (Boolean) -> Unit,
     showOverlay: Boolean, onOverlay: (Boolean) -> Unit, onClose: () -> Unit,
     modifier: Modifier = Modifier,
+    onGlobalTone: (() -> Unit)? = null,
+    onExport: (() -> Unit)? = null,
 ) {
     val selected = layers.firstOrNull { it.id == selectedId }
     var showNew by remember { mutableStateOf(false) }
     var showMore by remember { mutableStateOf(false) }
+    var control by remember { mutableStateOf("羽化") }
     var rename by remember { mutableStateOf<String?>(null) }
-    val accent = Color(0xFF237A46)
+    val accent = StudioColors.Pine
     fun replace(layer: MaskLayer) = onChange(layers.map { if (it.id == layer.id) layer else it })
     fun create(chosen: MaskTool) {
         val layer = MaskLayer(name = "蒙版 ${layers.size + 1}")
@@ -77,40 +81,29 @@ fun MaskPanel(
             replace(selected.copy(components = parts))
         }
     }
-    Column(modifier.fillMaxWidth().background(Color.White).navigationBarsPadding()) {
-        Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("蒙版", color = Color(0xFF202124), style = MaterialTheme.typography.titleSmall)
-            Box {
-                TextButton(onClick = { showNew = true }) { Text("＋新建") }
-                DropdownMenu(expanded = showNew, onDismissRequest = { showNew = false }) {
-                    MaskTool.entries.forEach { item ->
-                        DropdownMenuItem(text = { Text(item.label) }, onClick = { create(item) })
-                    }
-                }
-            }
-            Spacer(Modifier.weight(1f))
-            TextButton(onClick = { onOverlay(!showOverlay) }) { Text(if (showOverlay) "叠加：开" else "叠加：关") }
-            TextButton(onClick = onClose) { Text("完成", color = accent) }
-        }
+    Column(modifier.fillMaxWidth().clip(RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)).background(Color.White).navigationBarsPadding()) {
+        StudioPanelHeader("蒙版 · 局部调整", onClose)
         if (layers.isEmpty()) {
-            Text("新建蒙版，选择需要局部调整的区域", color = Color(0xFF62656B),
+            Text("新建蒙版，选择需要局部调整的区域", color = StudioColors.Muted,
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                MaskTool.entries.forEach { item -> TextButton(onClick = { create(item) }) { Text(item.label) } }
+                MaskTool.entries.forEach { item -> StudioTool(maskSymbol(item), item.label, { create(item) }) }
             }
         } else {
             Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 4.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Box {
+                    StudioIconButton(StudioSymbol.Plus, "新建蒙版", { showNew = true })
+                    DropdownMenu(showNew, { showNew = false }) {
+                        MaskTool.entries.forEach { item -> DropdownMenuItem(text = { Text(item.label) }, onClick = { create(item) }) }
+                    }
+                }
                 layers.forEach { layer ->
-                    Text(
-                        text = (if (layer.enabled) "◉ " else "○ ") + layer.name,
-                        color = if (layer.id == selectedId) accent else Color(0xFF62656B),
-                        style = MaterialTheme.typography.bodySmall,
-                        modifier = Modifier.background(Color(0xFFF2F3F5), RoundedCornerShape(10.dp))
-                            .border(1.dp, if (layer.id == selectedId) accent else Color.Transparent, RoundedCornerShape(10.dp))
-                            .clickable { onSelect(layer.id); onComponent(-1) }
-                            .padding(horizontal = 12.dp, vertical = 12.dp),
-                    )
+                    StudioTool(layer.components.firstOrNull()?.tool?.let(::maskSymbol) ?: StudioSymbol.Scan,
+                        layer.name + if (layer.enabled) "" else " · 隐藏",
+                        { onSelect(layer.id); onComponent(-1) }, selected = layer.id == selectedId, primary = true,
+                        modifier = Modifier.background(StudioColors.Canvas, RoundedCornerShape(12.dp)).padding(horizontal = 6.dp))
+
                 }
             }
         }
@@ -118,12 +111,11 @@ fun MaskPanel(
             Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                 TextButton(onClick = { onAdjusting(false) }) { Text("范围", color = if (!adjusting) accent else Color.Gray) }
                 TextButton(onClick = { onAdjusting(true); onOverlay(false) }) { Text("调色", color = if (adjusting) accent else Color.Gray) }
-                TextButton(onClick = { replace(selected.copy(inverted = !selected.inverted)) }) {
-                    Text("反转", color = if (selected.inverted) accent else Color.Gray)
-                }
+                StudioTool(StudioSymbol.FlipHorizontal, "反转", { replace(selected.copy(inverted = !selected.inverted)) }, selected = selected.inverted)
+                StudioTool(StudioSymbol.Layers2, "叠加", { onOverlay(!showOverlay) }, selected = showOverlay)
                 Spacer(Modifier.weight(1f))
                 Box {
-                    TextButton(onClick = { showMore = true }) { Text("更多") }
+                    StudioIconButton(StudioSymbol.Ellipsis, "蒙版选项", { showMore = true })
                     DropdownMenu(expanded = showMore, onDismissRequest = { showMore = false }) {
                         DropdownMenuItem(text = { Text(if (selected.enabled) "隐藏效果" else "显示效果") },
                             onClick = { replace(selected.copy(enabled = !selected.enabled)); showMore = false })
@@ -147,12 +139,10 @@ fun MaskPanel(
             } else {
                 Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp)) {
                     MaskTool.entries.forEach { item ->
-                        TextButton(onClick = { onTool(item); onComponent(-1) }) {
-                            Text(item.label, color = if (tool == item) accent else Color.Gray)
-                        }
+                        StudioTool(maskSymbol(item), item.label, { onTool(item); onComponent(-1) }, selected = tool == item)
                     }
-                    TextButton(onClick = { onSubtract(false); onComponent(-1) }) { Text("＋添加", color = if (!subtract) accent else Color.Gray) }
-                    TextButton(onClick = { onSubtract(true); onComponent(-1) }) { Text("－减去", color = if (subtract) accent else Color.Gray) }
+                    StudioTool(StudioSymbol.Plus, "添加", { onSubtract(false); onComponent(-1) }, selected = !subtract)
+                    StudioTool(StudioSymbol.Minus, "减去", { onSubtract(true); onComponent(-1) }, selected = subtract)
                 }
                 if (selected.components.isNotEmpty()) {
                     Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp)) {
@@ -169,26 +159,46 @@ fun MaskPanel(
                         }) { Text("撤销范围") }
                     }
                 }
-                if (tool == MaskTool.BRUSH) MaskSlider("大小", radius, 0.005f..0.25f) { updatePart(it, 0) }
-                MaskSlider("羽化", feather, 0f..1f) { updatePart(it, 1) }
-                MaskSlider("不透明度", opacity, 0.05f..1f) { updatePart(it, 2) }
                 val radial = selected.components.getOrNull(componentIndex)?.takeIf { it.tool == MaskTool.RADIAL }
-                if (radial != null) {
-                    MaskSlider("旋转", radial.rotation / 180f, -1f..1f, "${radial.rotation.roundToInt()}°") { value ->
+                val controls = buildList {
+                    if (tool == MaskTool.BRUSH) add("大小")
+                    add("羽化"); add("不透明度")
+                    if (radial != null) add("旋转")
+                }
+                val activeControl = control.takeIf { it in controls } ?: "羽化"
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                    controls.forEach { name ->
+                        TextButton(onClick = { control = name }) {
+                            Text(name, color = if (activeControl == name) accent else StudioColors.Muted,
+                                style = MaterialTheme.typography.labelSmall)
+                        }
+                    }
+                }
+                when (activeControl) {
+                    "大小" -> MaskSlider("大小", radius, 0.005f..0.25f) { updatePart(it, 0) }
+                    "不透明度" -> MaskSlider("不透明度", opacity, 0.05f..1f) { updatePart(it, 2) }
+                    "旋转" -> if (radial != null) MaskSlider("旋转", radial.rotation / 180f, -1f..1f, "${radial.rotation.roundToInt()}°") { value ->
                         replace(selected.copy(components = selected.components.mapIndexed { i, part ->
                             if (i == componentIndex) part.copy(rotation = value * 180f) else part
                         }))
                     }
+                    else -> MaskSlider("羽化", feather, 0f..1f) { updatePart(it, 1) }
                 }
                 Text(when (tool) {
                     MaskTool.BRUSH -> "单指涂抹，双指缩放移动；“减去”擦除选区"
                     MaskTool.RADIAL -> "绿色手柄旋转，白色控制点移动或缩放；也可用旋转滑杆"
                     else -> "拖动创建，白色控制点修改；双指缩放移动"
                 },
-                    color = Color(0xFF62656B), style = MaterialTheme.typography.labelSmall,
+                    color = StudioColors.Muted, style = MaterialTheme.typography.labelSmall,
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp))
             }
         }
+        if (onGlobalTone != null && onExport != null) Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+            StudioTool(StudioSymbol.Palette, "调色", onGlobalTone)
+            StudioTool(StudioSymbol.Scan, "蒙版", {}, selected = true, primary = true)
+            StudioTool(StudioSymbol.ArrowUpFromLine, "导出", onExport)
+        }
+
     }
     rename?.let { text ->
         AlertDialog(onDismissRequest = { rename = null }, title = { Text("重命名蒙版") },
@@ -203,8 +213,14 @@ fun MaskPanel(
 @Composable
 private fun MaskSlider(label: String, value: Float, range: ClosedFloatingPointRange<Float>, displayValue: String? = null, onChange: (Float) -> Unit) {
     Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text(label, color = Color(0xFF62656B), style = MaterialTheme.typography.labelSmall, modifier = Modifier.width(66.dp))
+        Text(label, color = StudioColors.Muted, style = MaterialTheme.typography.labelSmall, modifier = Modifier.width(66.dp))
         Slider(value = value, onValueChange = onChange, valueRange = range, modifier = Modifier.weight(1f))
-        Text(displayValue ?: "${(value * 100).roundToInt()}", color = Color(0xFF202124), style = MaterialTheme.typography.labelSmall, modifier = Modifier.width(44.dp))
+        Text(displayValue ?: "${(value * 100).roundToInt()}", color = StudioColors.Ink, style = MaterialTheme.typography.labelSmall, modifier = Modifier.width(44.dp))
     }
+}
+
+private fun maskSymbol(tool: MaskTool): StudioSymbol = when (tool) {
+    MaskTool.BRUSH -> StudioSymbol.Brush
+    MaskTool.LINEAR -> StudioSymbol.RectangleHorizontal
+    MaskTool.RADIAL -> StudioSymbol.CircleDashed
 }
