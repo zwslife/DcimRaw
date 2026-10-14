@@ -15,6 +15,9 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -23,12 +26,34 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.dcimgallery.raw.MainViewModel
 import com.dcimgallery.raw.core.exif.ExifReader
+import androidx.core.content.ContextCompat
+import android.content.pm.PackageManager
+import com.dcimgallery.raw.data.db.PhotoEntity
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 @Composable
 fun AppRoot(viewModel: MainViewModel = viewModel()) {
     val context = LocalContext.current
+    var pendingExport by remember { mutableStateOf<Pair<PhotoEntity, Boolean>?>(null) }
+    val exportPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        val request = pendingExport
+        pendingExport = null
+        if (granted && request != null) {
+            if (request.second) viewModel.exportEmbeddedJpeg(request.first) else viewModel.export(request.first)
+        } else if (!granted) {
+            Toast.makeText(context, "未获得存储写入权限，无法导出到相册", Toast.LENGTH_SHORT).show()
+        }
+    }
+    fun requestExport(photo: PhotoEntity, embedded: Boolean) {
+        if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.P &&
+            ContextCompat.checkSelfPermission(context, Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
+            pendingExport = photo to embedded
+            exportPermissionLauncher.launch(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+        } else if (embedded) viewModel.exportEmbeddedJpeg(photo) else viewModel.export(photo)
+    }
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner, viewModel) {
         val observer = LifecycleEventObserver { _, event ->
@@ -109,8 +134,8 @@ fun AppRoot(viewModel: MainViewModel = viewModel()) {
                     }
                 },
                 onEnsureDecoded = viewModel::ensureDecoded,
-                onExport = viewModel::export,
-                onExportEmbedded = viewModel::exportEmbeddedJpeg,
+                onExport = { requestExport(it, false) },
+                onExportEmbedded = { requestExport(it, true) },
                 onDelete = viewModel::delete,
                 onToneChange = viewModel::setTone,
                 onEnsureToneEngine = viewModel::ensureToneEngine,

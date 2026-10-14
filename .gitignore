@@ -13,3 +13,8 @@ externalNativeBuild/
 *.apk
 *.CR3
 *.cr3
+publishing/private/
+*.jks
+*.keystore
+keystore.properties
+publishing/vivo/*.zip
