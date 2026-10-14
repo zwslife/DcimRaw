@@ -62,6 +62,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.zIndex
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.TransformOrigin
@@ -76,6 +77,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.style.TextOverflow
@@ -141,6 +143,10 @@ fun PhotoPagerScreen(
     )
     val scope = rememberCoroutineScope()
     val gestureState = remember { PagerGestureState() }
+    val configuration = LocalConfiguration.current
+    LaunchedEffect(configuration.screenWidthDp, configuration.screenHeightDp) {
+        gestureState.reset()
+    }
     var showMore by remember { mutableStateOf(false) }
     var showExport by rememberSaveable { mutableStateOf(false) }
     var exportEmbedded by rememberSaveable { mutableStateOf(false) }
@@ -267,7 +273,7 @@ fun PhotoPagerScreen(
         ) {
             HorizontalPager(
                 state = pagerState,
-                modifier = Modifier.fillMaxSize(),
+                modifier = Modifier.fillMaxSize().clipToBounds(),
                 beyondViewportPageCount = 1,
                 userScrollEnabled = !showMasks,
             ) { page ->
@@ -292,9 +298,10 @@ fun PhotoPagerScreen(
                                     showInfo -> infoHeight.toDp(); uiVisible && isCr3 -> dockHeight.toDp(); else -> 0.dp })
                         })
                         .onSizeChanged { if (isCurrent) gestureState.viewSize = it }
+                        .clipToBounds()
                         // 图片与蒙版在同一个 graphicsLayer 内缩放；由父层在 Initial pass
                         // 统一识别双指手势，单指交给蒙版绘制或未缩放时的 Pager。
-                        .pointerInput(showMasks) {
+                        .pointerInput(showMasks, gestureState.viewSize) {
                             awaitEachGesture {
                                 awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
                                 gestureState.onTouchStart()
@@ -396,16 +403,6 @@ fun PhotoPagerScreen(
                         },
                 ) {
                     val tone = toneParams[photo.uri] ?: ToneParams()
-                    // 底层：内嵌预览（始终在位）
-                    AsyncImage(
-                        model = previewRequest,
-                        onSuccess = { state ->
-                            (state.result.drawable as? BitmapDrawable)?.bitmap?.let { fallbackBitmaps[photo.uri] = it }
-                        },
-                        contentDescription = photo.displayName,
-                        contentScale = ContentScale.Fit,
-                        modifier = Modifier.fillMaxSize(),
-                    )
                     // 显示优先级：全尺寸定稿 > 调色预览小图（有调色时）> 解码原图
                     val decoded = decodedMap[photo.uri]
                     val fullBmp = toneFull?.takeIf { it.first == photo.uri }?.second
@@ -416,6 +413,26 @@ fun PhotoPagerScreen(
                         tone.isNeutral && !hasLocalTone -> decoded
                         isCurrent && (showTone || showMasks) -> fullBmp ?: prevBmp ?: decoded
                         else -> fullBmp ?: prevBmp ?: decoded
+                    }
+                    // One photo layer: embedded JPEG and decoded RAW can have different
+                    // orientation/aspect ratios. Keeping both exposes the JPEG in letterboxes.
+                    if (displayBitmap != null) {
+                        Image(
+                            bitmap = displayBitmap.asImageBitmap(),
+                            contentDescription = photo.displayName,
+                            contentScale = ContentScale.Fit,
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    } else {
+                        AsyncImage(
+                            model = previewRequest,
+                            onSuccess = { state ->
+                                (state.result.drawable as? BitmapDrawable)?.bitmap?.let { fallbackBitmaps[photo.uri] = it }
+                            },
+                            contentDescription = photo.displayName,
+                            contentScale = ContentScale.Fit,
+                            modifier = Modifier.fillMaxSize(),
+                        )
                     }
                     if (showMasks && isCurrent && decoded != null) {
                         MaskOverlay(
@@ -440,20 +457,6 @@ fun PhotoPagerScreen(
                                 }
                             }, modifier = Modifier.fillMaxSize().zIndex(1f),
                         )
-                    }
-                    AnimatedVisibility(
-                        visible = displayBitmap != null,
-                        enter = fadeIn(animationSpec = tween(320)),
-                        exit = fadeOut(),
-                    ) {
-                        if (displayBitmap != null) {
-                            Image(
-                                bitmap = displayBitmap.asImageBitmap(),
-                                contentDescription = photo.displayName,
-                                contentScale = ContentScale.Fit,
-                                modifier = Modifier.fillMaxSize(),
-                            )
-                        }
                     }
                 }
             }

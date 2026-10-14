@@ -37,6 +37,8 @@ class PagerGestureState {
 
     private var scope: CoroutineScope? = null
     private var flingJob: Job? = null
+    private var transformJob: Job? = null
+    private var closeJob: Job? = null
     private var flingGeneration = 0
 
     fun attach(scope: CoroutineScope) {
@@ -47,6 +49,8 @@ class PagerGestureState {
 
     fun onTouchStart() {
         stopFling()
+        transformJob?.cancel()
+        closeJob?.cancel()
         isTouching = true
     }
 
@@ -121,13 +125,17 @@ class PagerGestureState {
         if (!isZoomed && viewSize.height > 0 && abs(dragY) > viewSize.height * CLOSE_THRESHOLD) {
             return true
         }
-        if (dragY != 0f) scope?.launch { animateDragY(0f) }
+        if (dragY != 0f) {
+            closeJob?.cancel()
+            closeJob = scope?.launch { animateDragY(0f) }
+        }
         return false
     }
 
     fun onDoubleTap(point: Offset) {
         stopFling()
-        scope?.launch {
+        transformJob?.cancel()
+        transformJob = scope?.launch {
             if (isZoomed) animateReset() else animateZoomTo(DOUBLE_TAP_SCALE, point)
         }
     }
@@ -135,6 +143,8 @@ class PagerGestureState {
     /** 翻页时重置。 */
     fun reset() {
         stopFling()
+        transformJob?.cancel()
+        closeJob?.cancel()
         isTouching = false
         scale = 1f
         offset = Offset.Zero
