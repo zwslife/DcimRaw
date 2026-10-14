@@ -1,4 +1,2 @@
 <?xml version="1.0" encoding="utf-8"?>
-<vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
-    <path android:fillColor="#000000" android:fillType="evenOdd" android:pathData="M54,29a25,25 0,1 1,0 50a25,25 0,1 1,0 -50M54,45L61.794,49.5L61.794,58.5L54,63L46.206,58.5L46.206,49.5Z" />
-</vector>
+<bitmap xmlns:android="http://schemas.android.com/apk/res/android" android:src="@drawable/launcher_raw_text" android:gravity="fill" android:filter="true" />
