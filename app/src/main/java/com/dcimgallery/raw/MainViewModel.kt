@@ -412,6 +412,17 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** 导出当前照片 JPEG 到系统相册（应用当前调色参数）。 */
+    fun exportEmbeddedJpeg(photo: PhotoEntity) {
+        if (_exporting.value) return
+        viewModelScope.launch {
+            _exporting.value = true
+            try {
+                val reason = rawRepository.exportEmbeddedJpeg(photo.uri, photo.displayName)
+                toast.value = reason?.let { "导出失败：$it" } ?: "内嵌 JPEG 已导出到相册（未应用调色）"
+            } finally { _exporting.value = false }
+        }
+    }
+
     fun export(photo: PhotoEntity) {
         if (_exporting.value) return
         viewModelScope.launch {

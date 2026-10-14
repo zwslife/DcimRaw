@@ -11,6 +11,8 @@ import com.dcimgallery.raw.GalleryApp
 import com.dcimgallery.raw.core.tone.ToneParams
 import com.dcimgallery.raw.core.tone.MaskLayer
 import com.dcimgallery.raw.core.tone.MaskRenderCache
+import com.dcimgallery.raw.core.cr3.Cr3Parser
+import com.dcimgallery.raw.core.cr3.extractFullJpegPreview
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -57,6 +59,42 @@ class RawDecodeRepository(private val app: GalleryApp) {
             val fd = it.detachFd() // 所有权移交 native（桥接层负责关闭）
             return RawDecoder.decodeFd(fd, false)
                 ?: throw RuntimeException("RAW 解码返回空")
+        }
+    }
+
+    /** Copy the camera's embedded JPEG bytes directly, preserving its metadata and compression. */
+    suspend fun exportEmbeddedJpeg(uriString: String, displayName: String): String? = withContext(Dispatchers.IO) {
+        val resolver = app.contentResolver
+        var pending: Uri? = null
+        try {
+            val bytes = resolver.openFileDescriptor(Uri.parse(uriString), "r")?.use { pfd ->
+                Cr3Parser.open(pfd).extractFullJpegPreview()
+            } ?: return@withContext "RAW 中没有可导出的内嵌 JPEG，或原片无法读取"
+            val values = ContentValues().apply {
+                put(MediaStore.Images.Media.DISPLAY_NAME, displayName.substringBeforeLast('.') + "_embedded.jpg")
+                put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/CR3相册")
+                    put(MediaStore.Images.Media.IS_PENDING, 1)
+                }
+            }
+            val item = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
+                ?: return@withContext "系统相册写入被拒绝"
+            pending = item
+            val out = resolver.openOutputStream(item) ?: throw IllegalStateException("无法写入相册文件")
+            out.use { it.write(bytes) }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                val published = resolver.update(item, ContentValues().apply {
+                    put(MediaStore.Images.Media.IS_PENDING, 0)
+                }, null, null)
+                check(published > 0) { "无法发布相册文件" }
+            }
+            pending = null
+            null
+        } catch (error: Exception) {
+            error.message ?: "内嵌 JPEG 导出失败"
+        } finally {
+            pending?.let { runCatching { resolver.delete(it, null, null) } }
         }
     }
 

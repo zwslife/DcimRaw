@@ -40,6 +40,9 @@ class Cr3Parser private constructor(private val ch: FileChannel) {
         /** 打开文件描述符并返回解析器；调用方负责关闭 pfd。 */
         fun open(pfd: ParcelFileDescriptor): Cr3Parser =
             Cr3Parser(FileInputStream(pfd.fileDescriptor).channel)
+
+        /** Allows the same parser to be checked against local RAW fixtures. Caller owns the channel. */
+        internal fun open(channel: FileChannel): Cr3Parser = Cr3Parser(channel)
     }
 
     private fun readBoxHeader(pos: Long): Box? {
@@ -236,10 +239,13 @@ class Cr3Parser private constructor(private val ch: FileChannel) {
 
     /** 读取指定偏移与长度的样本数据。 */
     fun readSample(offset: Long, size: Long): ByteArray {
+        require(offset >= 0 && size > 0 && size <= Int.MAX_VALUE && offset <= ch.size() && size <= ch.size() - offset) {
+            "RAW 内嵌样本范围无效或文件不完整"
+        }
         val buf = ByteBuffer.allocate(size.toInt())
         ch.position(offset)
         while (buf.hasRemaining()) {
-            if (ch.read(buf) < 0) break
+            if (ch.read(buf) < 0) throw java.io.EOFException("RAW 内嵌样本不完整")
         }
         return buf.array()
     }

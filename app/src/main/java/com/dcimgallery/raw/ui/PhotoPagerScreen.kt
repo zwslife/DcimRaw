@@ -125,6 +125,7 @@ fun PhotoPagerScreen(
     loadExif: suspend (PhotoEntity) -> ExifInfo?,
     onEnsureDecoded: (PhotoEntity) -> Unit,
     onExport: (PhotoEntity) -> Unit,
+    onExportEmbedded: (PhotoEntity) -> Unit,
     onDelete: (PhotoEntity) -> Unit,
     onToneChange: (String, ToneParams) -> Unit,
     onEnsureToneEngine: (PhotoEntity) -> Unit,
@@ -140,6 +141,7 @@ fun PhotoPagerScreen(
     val gestureState = remember { PagerGestureState() }
     var showMore by remember { mutableStateOf(false) }
     var showExport by rememberSaveable { mutableStateOf(false) }
+    var exportEmbedded by rememberSaveable { mutableStateOf(false) }
     var tonePanelHeight by remember { mutableIntStateOf(0) }
     var dockHeight by remember { mutableIntStateOf(0) }
     var infoHeight by remember { mutableIntStateOf(0) }
@@ -663,12 +665,21 @@ fun PhotoPagerScreen(
                     Column {
                         Text(current.displayName, style = MaterialTheme.typography.titleSmall)
                         Spacer(Modifier.height(20.dp))
+                        StudioChoice("调色后 JPEG", { exportEmbedded = false }, symbol = StudioSymbol.Palette, selected = !exportEmbedded)
+                        StudioChoice("RAW 内嵌 JPEG", { exportEmbedded = true }, symbol = StudioSymbol.Images, selected = exportEmbedded)
+                        Spacer(Modifier.height(12.dp))
                         ExifRow("格式", "JPEG")
-                        ExifRow("尺寸", "原始尺寸")
-                        ExifRow("调整", "全局调色与蒙版")
+                        ExifRow("尺寸", if (exportEmbedded) "机内预览尺寸" else "原始尺寸")
+                        ExifRow("调整", if (exportEmbedded) "不应用调色与蒙版" else "全局调色与蒙版")
+                        if (exportEmbedded) Text("直接提取内嵌文件，保留机内 JPEG 画质与元数据。",
+                            style = MaterialTheme.typography.bodySmall, color = StudioColors.Muted,
+                            modifier = Modifier.padding(top = 12.dp))
                     }
                 },
-                confirmButton = { Button(onClick = { showExport = false; onExport(current) }) { Text("导出到相册") } },
+                confirmButton = { Button(onClick = {
+                    showExport = false
+                    if (exportEmbedded) onExportEmbedded(current) else onExport(current)
+                }, enabled = !exporting) { Text("导出到相册") } },
                 dismissButton = { TextButton(onClick = { showExport = false }) { Text("取消") } })
         }
 

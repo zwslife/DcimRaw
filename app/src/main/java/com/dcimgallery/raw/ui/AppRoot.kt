@@ -110,6 +110,7 @@ fun AppRoot(viewModel: MainViewModel = viewModel()) {
                 },
                 onEnsureDecoded = viewModel::ensureDecoded,
                 onExport = viewModel::export,
+                onExportEmbedded = viewModel::exportEmbeddedJpeg,
                 onDelete = viewModel::delete,
                 onToneChange = viewModel::setTone,
                 onEnsureToneEngine = viewModel::ensureToneEngine,
