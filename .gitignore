@@ -18,3 +18,4 @@ publishing/private/
 *.keystore
 keystore.properties
 publishing/vivo/*.zip
+publishing/ruotu-privacy-site/
