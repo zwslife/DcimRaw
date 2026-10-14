@@ -18,8 +18,10 @@ class MainActivity : ComponentActivity() {
         )
         setContent {
             AppTheme {
-                AppRoot()
-                com.dcimgallery.raw.ui.CrashReportDialog()
+                com.dcimgallery.raw.ui.PrivacyGate {
+                    AppRoot()
+                    com.dcimgallery.raw.ui.CrashReportDialog()
+                }
             }
         }
     }

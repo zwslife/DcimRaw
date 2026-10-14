@@ -57,6 +57,7 @@ fun GridScreen(
     onRefresh: () -> Unit, onChangeDir: () -> Unit, onOpen: (Int) -> Unit,
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
+    val openPrivacy = LocalOpenPrivacyPolicy.current
     val photos = androidx.compose.runtime.remember(items) { items.filterIsInstance<GridItem.PhotoItem>().map { it.photo } }
     val usb by androidx.compose.runtime.produceState(emptySet<String>(), photos) {
         value = StorageOrigin.usbPhotos(context, photos)
@@ -66,6 +67,7 @@ fun GridScreen(
             Text("照片图库", Modifier.weight(1f), style = MaterialTheme.typography.headlineSmall, color = StudioColors.Ink)
             RefreshButton(scanning, onRefresh)
             StudioIconButton(StudioSymbol.FolderOpen, "选择目录", onChangeDir)
+            StudioIconButton(StudioSymbol.Info, "隐私政策", openPrivacy)
         }
         if (items.isEmpty()) Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {

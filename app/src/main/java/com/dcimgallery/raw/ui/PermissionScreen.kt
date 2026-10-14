@@ -22,6 +22,7 @@ fun PermissionScreen(
     onGrantLocal: () -> Unit,
     onPickDirectory: () -> Unit,
 ) {
+    val openPrivacy = LocalOpenPrivacyPolicy.current
     Column(
         modifier = Modifier.fillMaxSize().padding(32.dp),
         verticalArrangement = Arrangement.Center,
@@ -49,5 +50,7 @@ fun PermissionScreen(
             StudioIcon(StudioSymbol.FolderOpen)
             Text("选择照片目录", Modifier.padding(start = 10.dp))
         }
+        Spacer(Modifier.height(12.dp))
+        androidx.compose.material3.TextButton(onClick = openPrivacy) { Text("隐私政策") }
     }
 }

@@ -1,4 +1,6 @@
 import java.util.Properties
+import java.time.LocalDate
+import java.security.MessageDigest
 
 plugins {
     id("com.android.application")
@@ -14,6 +16,44 @@ val releaseProperties = Properties().apply {
 }
 val releaseSigningReady = listOf("storeFile", "storePassword", "keyAlias", "keyPassword")
     .all { !releaseProperties.getProperty(it).isNullOrBlank() }
+val publisherFile = rootProject.file("publishing/private/publisher.properties")
+val publisher = Properties().apply {
+    if (publisherFile.isFile) publisherFile.reader(Charsets.UTF_8).use { load(it) }
+}
+val publisherName = publisher.getProperty("developerName", "").trim()
+val policyDate = publisher.getProperty("effectiveDate", "").trim()
+val policyReady = publisherName.isNotBlank() &&
+    publisherName.none { it == '\n' || it == '\r' || it == '【' || it == '】' } && runCatching {
+    LocalDate.parse(policyDate)
+}.isSuccess && publisher.getProperty("policyApproved") == "true"
+val policyTemplate = rootProject.file("publishing/vivo/02-隐私政策.md")
+val policyText = policyTemplate.readText(Charsets.UTF_8).let { draft ->
+    if (policyReady) draft.substringBefore("\n---")
+        .replace("（待定稿）", "")
+        .replace("若图开发者【待填写个人实名名称】", publisherName)
+        .replace("【上线前确认】", policyDate) else draft
+}
+val policyVersion = MessageDigest.getInstance("SHA-256")
+    .digest(policyText.toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) }
+val policyAssets = layout.buildDirectory.dir("generated/privacyAssets")
+val generatePrivacyAssets by tasks.registering {
+    inputs.file(policyTemplate)
+    inputs.property("policyText", policyText)
+    outputs.dir(policyAssets)
+    doLast {
+        policyAssets.get().file("privacy-policy.txt").asFile.apply {
+            parentFile.mkdirs()
+            writeText(policyText.replace(Regex("(?m)^#+ "), ""), Charsets.UTF_8)
+        }
+    }
+}
+val validatePublishingSetup by tasks.registering {
+    doLast {
+        check(policyReady) { "Privacy policy is still a draft; complete and approve publishing/private/publisher.properties." }
+        check(releaseSigningReady) { "Release signing credentials are missing." }
+        check(rootProject.file(releaseProperties.getProperty("storeFile")).isFile) { "Release keystore file is missing." }
+    }
+}
 
 android {
     namespace = "com.dcimgallery.raw"
@@ -26,6 +66,8 @@ android {
         targetSdk = 34
         versionCode = 36
         versionName = "0.9.12"
+        buildConfigField("boolean", "PRIVACY_POLICY_READY", policyReady.toString())
+        buildConfigField("String", "PRIVACY_POLICY_VERSION", "\"$policyVersion\"")
 
         ndk {
             abiFilters += listOf("arm64-v8a")
@@ -61,7 +103,9 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
+    sourceSets.getByName("main").assets.srcDir(policyAssets)
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -82,12 +126,17 @@ android {
 }
 
 tasks.matching { it.name == "packageRelease" || it.name == "signReleaseBundle" }.configureEach {
+    dependsOn(validatePublishingSetup)
     doFirst {
+        check(policyReady) {
+            "Privacy policy is still a draft. Complete and approve publishing/private/publisher.properties."
+        }
         check(releaseSigningReady) {
             "Release signing is missing. Configure publishing/private/keystore.properties; see publishing/vivo/07-正式包构建.md."
         }
     }
 }
+tasks.named("preBuild").configure { dependsOn(generatePrivacyAssets) }
 
 dependencies {
     val composeBom = platform("androidx.compose:compose-bom:2024.09.00")
