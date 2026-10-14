@@ -1,9 +1,19 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     kotlin("android")
     kotlin("plugin.compose")
     id("com.google.devtools.ksp")
 }
+
+// Release credentials stay outside Git and the public publishing materials.
+val releasePropertiesFile = rootProject.file("publishing/private/keystore.properties")
+val releaseProperties = Properties().apply {
+    if (releasePropertiesFile.isFile) releasePropertiesFile.inputStream().use { load(it) }
+}
+val releaseSigningReady = listOf("storeFile", "storePassword", "keyAlias", "keyPassword")
+    .all { !releaseProperties.getProperty(it).isNullOrBlank() }
 
 android {
     namespace = "com.dcimgallery.raw"
@@ -24,6 +34,21 @@ android {
             cmake {
                 arguments("-DANDROID_STL=c++_shared")
             }
+        }
+    }
+
+    signingConfigs {
+        if (releaseSigningReady) create("release") {
+            storeFile = rootProject.file(releaseProperties.getProperty("storeFile"))
+            storePassword = releaseProperties.getProperty("storePassword")
+            keyAlias = releaseProperties.getProperty("keyAlias")
+            keyPassword = releaseProperties.getProperty("keyPassword")
+        }
+    }
+    buildTypes {
+        getByName("release") {
+            isDebuggable = false
+            if (releaseSigningReady) signingConfig = signingConfigs.getByName("release")
         }
     }
 
@@ -52,6 +77,14 @@ android {
     packaging {
         resources {
             excludes += setOf("META-INF/DEPENDENCIES", "META-INF/LICENSE*", "META-INF/NOTICE*")
+        }
+    }
+}
+
+tasks.matching { it.name == "packageRelease" || it.name == "signReleaseBundle" }.configureEach {
+    doFirst {
+        check(releaseSigningReady) {
+            "Release signing is missing. Configure publishing/private/keystore.properties; see publishing/vivo/07-正式包构建.md."
         }
     }
 }
