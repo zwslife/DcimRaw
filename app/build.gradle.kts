@@ -22,16 +22,17 @@ val publisher = Properties().apply {
 }
 val publisherName = publisher.getProperty("developerName", "").trim()
 val policyDate = publisher.getProperty("effectiveDate", "").trim()
+val displayedPolicyDate = if (policyDate == "FIRST_RELEASE") "首次正式发布之日（以 vivo 商店首次上架记录为准）" else policyDate
 val policyReady = publisherName.isNotBlank() &&
-    publisherName.none { it == '\n' || it == '\r' || it == '【' || it == '】' } && runCatching {
+    publisherName.none { it == '\n' || it == '\r' || it == '【' || it == '】' } && (policyDate == "FIRST_RELEASE" || runCatching {
     LocalDate.parse(policyDate)
-}.isSuccess && publisher.getProperty("policyApproved") == "true"
+}.isSuccess) && publisher.getProperty("policyApproved") == "true"
 val policyTemplate = rootProject.file("publishing/vivo/02-隐私政策.md")
 val policyText = policyTemplate.readText(Charsets.UTF_8).let { draft ->
     if (policyReady) draft.substringBefore("\n---")
         .replace("（待定稿）", "")
         .replace(Regex("(?m)^开发者：.*$")) { "开发者：$publisherName" }
-        .replace("【上线前确认】", policyDate) else draft
+        .replace("【上线前确认】", displayedPolicyDate) else draft
 }
 val policyVersion = MessageDigest.getInstance("SHA-256")
     .digest(policyText.toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) }
@@ -64,8 +65,8 @@ android {
         applicationId = "com.dcimgallery.raw"
         minSdk = 26
         targetSdk = 34
-        versionCode = 36
-        versionName = "0.9.12"
+        versionCode = 37
+        versionName = "0.9.13"
         buildConfigField("boolean", "PRIVACY_POLICY_READY", policyReady.toString())
         buildConfigField("String", "PRIVACY_POLICY_VERSION", "\"$policyVersion\"")
 
