@@ -92,6 +92,8 @@ import com.dcimgallery.raw.core.exif.ExifInfo
 import com.dcimgallery.raw.core.tone.ToneParams
 import com.dcimgallery.raw.core.tone.MaskLayer
 import com.dcimgallery.raw.core.tone.MaskTool
+import com.dcimgallery.raw.core.raw.PhotoFileType
+import com.dcimgallery.raw.core.raw.PhotoFormatProbe
 import com.dcimgallery.raw.data.db.PhotoEntity
 import java.time.Instant
 import java.time.ZoneId
@@ -161,6 +163,11 @@ fun PhotoPagerScreen(
     val fallbackBitmaps = remember { mutableStateMapOf<String, Bitmap>() }
 
     val current = photos.getOrNull(pagerState.currentPage)
+    val currentFileType by androidx.compose.runtime.key(current?.uri, current?.sizeBytes, current?.lastModified) {
+        produceState(PhotoFileType.UNKNOWN) {
+            value = current?.let { PhotoFormatProbe.read(context, it.uri, it.sizeBytes, it.lastModified) } ?: PhotoFileType.UNKNOWN
+        }
+    }
     var comparingOriginal by remember(current?.uri) { mutableStateOf(false) }
     val isCr3 = current?.source == "external"
     val usbPhotos by produceState(emptySet<String>(), photos) { value = StorageOrigin.usbPhotos(context, photos) }
@@ -478,7 +485,7 @@ fun PhotoPagerScreen(
                             overflow = TextOverflow.Ellipsis,
                         )
                         Text(
-                            text = "${if (isCr3) "RAW · " else ""}${pagerState.currentPage + 1} / ${photos.size}",
+                            text = "${if (currentFileType == PhotoFileType.CR3) "RAW · " else ""}${pagerState.currentPage + 1} / ${photos.size}",
                             style = MaterialTheme.typography.bodySmall,
                             color = StudioColors.Muted,
                         )

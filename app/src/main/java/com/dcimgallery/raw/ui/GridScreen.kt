@@ -46,6 +46,8 @@ import com.dcimgallery.raw.GridItem
 import com.dcimgallery.raw.R
 import com.dcimgallery.raw.core.coil.Cr3Image
 import com.dcimgallery.raw.data.db.PhotoEntity
+import com.dcimgallery.raw.core.raw.PhotoFileType
+import com.dcimgallery.raw.core.raw.PhotoFormatProbe
 
 /** 白瓷图库：按日期保留分组，第一张照片作为横幅。 */
 @Composable
@@ -113,12 +115,16 @@ private fun RefreshButton(scanning: Boolean, onRefresh: () -> Unit) {
 
 @Composable
 private fun GridCell(photo: PhotoEntity, wide: Boolean, usb: Boolean, onClick: () -> Unit) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val fileType by androidx.compose.runtime.produceState(PhotoFileType.UNKNOWN, photo.uri, photo.sizeBytes, photo.lastModified) {
+        value = PhotoFormatProbe.read(context, photo.uri, photo.sizeBytes, photo.lastModified)
+    }
     Box(Modifier.aspectRatio(if (wide) 1.5f else 1f).clip(RoundedCornerShape(12.dp))
         .background(StudioColors.Canvas).clickable(onClick = onClick)) {
         val raw = photo.source == "external"
         AsyncImage(model = if (raw) Cr3Image(Uri.parse(photo.uri)) else Uri.parse(photo.uri), contentDescription = photo.displayName,
             contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
-        if (raw) Text("RAW", Modifier.align(Alignment.BottomStart).padding(10.dp)
+        if (fileType == PhotoFileType.CR3) Text("RAW", Modifier.align(Alignment.BottomStart).padding(10.dp)
             .clip(RoundedCornerShape(4.dp)).background(Color.White.copy(alpha = .9f)).padding(horizontal = 6.dp, vertical = 2.dp),
             style = MaterialTheme.typography.labelSmall, color = StudioColors.Ink)
         if (usb) Box(Modifier.align(Alignment.BottomEnd).padding(10.dp).size(28.dp).clip(RoundedCornerShape(6.dp))

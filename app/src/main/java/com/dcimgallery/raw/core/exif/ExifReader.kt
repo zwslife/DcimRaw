@@ -46,8 +46,13 @@ object ExifReader {
     private const val TAG_LENS_MODEL = 0xA434
     private const val TAG_FOCAL_35MM = 0xA405
 
-    fun read(context: Context, uri: Uri, source: String): ExifInfo? =
-        if (source == "external") readCr3(context, uri) else readLocal(context, uri)
+    fun read(context: Context, uri: Uri, source: String): ExifInfo? {
+        if (source != "external") return readLocal(context, uri)
+        val jpeg = runCatching {
+            context.contentResolver.openInputStream(uri)?.use { it.read() == 0xFF && it.read() == 0xD8 }
+        }.getOrDefault(false) == true
+        return if (jpeg) readLocal(context, uri) else readCr3(context, uri)
+    }
 
     // ---- 外接 CR3：CMT 盒 TIFF ----
 

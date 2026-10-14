@@ -14,8 +14,8 @@ android {
         applicationId = "com.dcimgallery.raw"
         minSdk = 26
         targetSdk = 34
-        versionCode = 31
-        versionName = "0.9.7"
+        versionCode = 32
+        versionName = "0.9.8"
 
         ndk {
             abiFilters += listOf("arm64-v8a")

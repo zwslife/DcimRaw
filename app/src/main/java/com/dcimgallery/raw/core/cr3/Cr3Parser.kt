@@ -228,6 +228,17 @@ class Cr3Parser private constructor(private val ch: FileChannel) {
     }
 
     /** 读取指定偏移的少量字节（魔数探测用）。 */
+    fun isStandaloneJpeg(): Boolean {
+        val position = ch.position()
+        return try {
+            val magic = peekAt(0, 3)
+            magic[0] == 0xFF.toByte() && magic[1] == 0xD8.toByte() && magic[2] == 0xFF.toByte()
+        } finally { ch.position(position) }
+    }
+
+    /** Some transferred files retain a .CR3 name even though their content is already JPEG. */
+    fun readStandaloneJpeg(): ByteArray? = if (isStandaloneJpeg()) readSample(0, ch.size()) else null
+
     fun peekAt(offset: Long, count: Int): ByteArray {
         val buf = ByteBuffer.allocate(count)
         ch.position(offset)
@@ -261,6 +272,7 @@ class Cr3Parser private constructor(private val ch: FileChannel) {
  * 返回原始 JPEG 字节；失败返回 null。
  */
 fun Cr3Parser.extractFullJpegPreview(): ByteArray? {
+    readStandaloneJpeg()?.let { return it }
     val tracks = parseTracks() ?: return null
     val jpeg = tracks
         .filter { it.sampleSizes.isNotEmpty() && it.chunkOffsets.isNotEmpty() }

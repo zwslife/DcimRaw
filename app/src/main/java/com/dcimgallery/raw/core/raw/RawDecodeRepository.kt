@@ -3,6 +3,8 @@ package com.dcimgallery.raw.core.raw
 import android.content.ContentValues
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Matrix
+import androidx.exifinterface.media.ExifInterface
 import android.net.Uri
 import android.os.Build
 import android.provider.MediaStore
@@ -56,6 +58,19 @@ class RawDecodeRepository(private val app: GalleryApp) {
         val pfd = app.contentResolver.openFileDescriptor(Uri.parse(uriString), "r")
             ?: throw RuntimeException("无法打开文件描述符")
         pfd.use {
+            val jpeg = Cr3Parser.open(it).readStandaloneJpeg()
+            if (jpeg != null) {
+                val decoded = BitmapFactory.decodeByteArray(jpeg, 0, jpeg.size)
+                    ?: throw RuntimeException("JPEG 解码失败")
+                val exif = ExifInterface(jpeg.inputStream())
+                val matrix = Matrix().apply {
+                    if (exif.isFlipped) postScale(-1f, 1f)
+                    postRotate(exif.rotationDegrees.toFloat())
+                }
+                if (matrix.isIdentity) return decoded
+                return Bitmap.createBitmap(decoded, 0, 0, decoded.width, decoded.height, matrix, true)
+                    .also { corrected -> if (corrected !== decoded) decoded.recycle() }
+            }
             val fd = it.detachFd() // 所有权移交 native（桥接层负责关闭）
             return RawDecoder.decodeFd(fd, false)
                 ?: throw RuntimeException("RAW 解码返回空")
