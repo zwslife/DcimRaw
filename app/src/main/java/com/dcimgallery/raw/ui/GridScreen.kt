@@ -2,6 +2,16 @@ package com.dcimgallery.raw.ui
 
 import androidx.compose.foundation.layout.*
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
+import kotlinx.coroutines.isActive
 import android.net.Uri
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -52,8 +62,7 @@ fun GridScreen(
     Column(Modifier.fillMaxSize().background(Color.White).statusBarsPadding().navigationBarsPadding()) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
             Text("照片图库", Modifier.weight(1f), style = MaterialTheme.typography.headlineSmall, color = StudioColors.Ink)
-            if (scanning) androidx.compose.material3.CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
-            StudioIconButton(StudioSymbol.RefreshCw, "刷新", onRefresh, enabled = !scanning)
+            RefreshButton(scanning, onRefresh)
             StudioIconButton(StudioSymbol.FolderOpen, "选择目录", onChangeDir)
         }
         if (items.isEmpty()) Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
@@ -82,6 +91,23 @@ fun GridScreen(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun RefreshButton(scanning: Boolean, onRefresh: () -> Unit) {
+    val angle = remember { Animatable(0f) }
+    LaunchedEffect(scanning) {
+        angle.snapTo(0f)
+        if (scanning) while (isActive) {
+            angle.animateTo(360f, tween(durationMillis = 900, easing = LinearEasing))
+            angle.snapTo(0f)
+        }
+    }
+    Box(Modifier.size(44.dp).clip(CircleShape).clickable(enabled = !scanning, onClick = onRefresh)
+        .semantics { stateDescription = if (scanning) "正在刷新" else "刷新完成" },
+        contentAlignment = Alignment.Center) {
+        StudioIcon(StudioSymbol.RefreshCw, Modifier.graphicsLayer { rotationZ = angle.value }, label = "刷新")
     }
 }
 
