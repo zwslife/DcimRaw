@@ -97,6 +97,7 @@ report += '- 正式签名候选包已构建并通过 apksigner v2 验证，签�
 report += f'- APK SHA-256：{hashlib.sha256(apk.read_bytes()).hexdigest()}。\n'
 report += f'- 签名证书 SHA-256：{signer}。\n'
 report += '- APK 内政策与定稿 Markdown 的纯文本内容一致，主体赵巍，生效日首次正式发布之日；PRIVACY_POLICY_READY=true。\n'
-report += '- 用户确认 vivo 实名认证审核中；尚无通过证据。版权/备案要求、政策公开网址、真实截图、签名密钥离线备份和真机验收未完成。\n'
+report += '- 政策公开网址已部署并匿名核验 HTTP 200：https://ruotu-privacy-policy.zwei-243360284.chatgpt.site/。\n'
+report += '- 用户确认 vivo 实名认证审核中；尚无通过证据。版权/备案要求、真实截图、签名密钥离线备份和真机验收未完成。\n'
 (folder / '09-发布核验记录.md').write_text(report, encoding='utf-8', newline='\n')
 print(f'Resolved {len(coordinates)} coordinates; {missing} license metadata gaps. Release manifest verified.')
