@@ -30,7 +30,7 @@ val policyTemplate = rootProject.file("publishing/vivo/02-隐私政策.md")
 val policyText = policyTemplate.readText(Charsets.UTF_8).let { draft ->
     if (policyReady) draft.substringBefore("\n---")
         .replace("（待定稿）", "")
-        .replace("若图开发者【待填写个人实名名称】", publisherName)
+        .replace(Regex("(?m)^开发者：.*$")) { "开发者：$publisherName" }
         .replace("【上线前确认】", policyDate) else draft
 }
 val policyVersion = MessageDigest.getInstance("SHA-256")

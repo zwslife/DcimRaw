@@ -26,7 +26,7 @@ html = '''<!doctype html><html lang="zh-CN"><meta charset="utf-8">
 <title>若图隐私政策草稿</title>
 <style>body{font-family:system-ui,sans-serif;max-width:760px;margin:32px auto;padding:0 20px;color:#202522;line-height:1.8}pre{white-space:pre-wrap;font:inherit}.draft{background:#fff4d8;padding:12px;border-radius:8px}</style>
 <p class="draft">未生效草稿：开发者实名名称、生效日期和最终包行为待确认。不要直接作为最终政策上传。</p><pre>''' + escape(policy) + '</pre></html>'
-(folder / 'privacy-policy-draft.html').write_text(html, encoding='utf-8')
+(folder / 'privacy-policy-draft.html').write_text(html, encoding='utf-8', newline='\n')
 
 licenses = folder / 'licenses'
 licenses.mkdir(exist_ok=True)
