@@ -31,6 +31,7 @@ enum class StudioSymbol(val resource: Int) {
     ArrowLeft(R.drawable.studio_arrow_left),
     ChartNoAxesColumn(R.drawable.studio_chart_no_axes_column),
     Info(R.drawable.studio_info),
+    Settings(R.drawable.studio_sliders_horizontal),
     Ellipsis(R.drawable.studio_ellipsis),
     RefreshCw(R.drawable.studio_refresh_cw),
     FolderOpen(R.drawable.studio_folder_open),

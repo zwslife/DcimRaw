@@ -33,6 +33,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.mapLatest
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -42,6 +44,8 @@ import kotlinx.coroutines.withContext
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
+import com.dcimgallery.raw.core.raw.PhotoFormatProbe
+import com.dcimgallery.raw.core.raw.PhotoFileType
 
 /** 网格元素：日期分组头或照片。 */
 sealed interface GridItem {
@@ -49,12 +53,30 @@ sealed interface GridItem {
     data class PhotoItem(val globalIndex: Int, val photo: PhotoEntity) : GridItem
 }
 
+@OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     private val repository = PhotoRepository(app as GalleryApp)
+    private val galleryPreferences = app.getSharedPreferences("gallery-settings", android.content.Context.MODE_PRIVATE)
+    private val _showCr3Only = MutableStateFlow(galleryPreferences.getBoolean("cr3-only", false))
+    val showCr3Only: StateFlow<Boolean> = _showCr3Only
 
     val photos: StateFlow<List<PhotoEntity>> =
-        repository.photos.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+        combine(repository.photos, _showCr3Only) { list, only -> list to only }
+            .mapLatest { (list, only) ->
+                if (!only) list else withContext(Dispatchers.IO) {
+                    list.filter { photo ->
+                        PhotoFormatProbe.read(app, photo.uri, photo.sizeBytes, photo.lastModified) == PhotoFileType.CR3
+                    }
+                }
+            }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    fun setShowCr3Only(enabled: Boolean) {
+        if (_showCr3Only.value == enabled) return
+        closePager()
+        galleryPreferences.edit().putBoolean("cr3-only", enabled).apply()
+        _showCr3Only.value = enabled
+    }
 
     /** 按拍摄日期分组后的网格项（保持 photos 的倒序） */
     val gridItems: StateFlow<List<GridItem>> = photos
@@ -240,9 +262,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         selectedIndex.value = -1
     }
 
-    /** 大图页触发：后台完整解码 RAW（仅外接 CR3，幂等、静默失败）。 */
+    /** All photo sources use the same decoded bitmap and editing pipeline. */
     fun ensureDecoded(photo: PhotoEntity) {
-        if (photo.source != "external") return
         val uri = photo.uri
         loadEdits(uri)
         if (_decodedMap.value.containsKey(uri) || _decodingSet.value.contains(uri)) return
@@ -294,7 +315,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     /** 打开调色面板（或照片已有调色）时调用：为当前照片准备预览会话。 */
     fun ensureToneEngine(photo: PhotoEntity) {
-        if (photo.source != "external") return
         if (toneHandleUri == photo.uri && toneHandle != 0L) return
         val bitmap = _decodedMap.value[photo.uri] ?: return
         viewModelScope.launch(Dispatchers.Default) {

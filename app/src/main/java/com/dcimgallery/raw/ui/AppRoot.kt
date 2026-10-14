@@ -64,6 +64,7 @@ fun AppRoot(viewModel: MainViewModel = viewModel()) {
     }
     val treeUri by viewModel.treeUri.collectAsState()
     val photos by viewModel.photos.collectAsState()
+    val showCr3Only by viewModel.showCr3Only.collectAsState()
     val gridItems by viewModel.gridItems.collectAsState()
     val scanning by viewModel.scanning.collectAsState()
     val scanFound by viewModel.scanFound.collectAsState()
@@ -153,6 +154,8 @@ fun AppRoot(viewModel: MainViewModel = viewModel()) {
                 onRefresh = viewModel::rescan,
                 onChangeDir = { treeLauncher.launch(null) },
                 onOpen = viewModel::openAt,
+                showCr3Only = showCr3Only,
+                onShowCr3Only = viewModel::setShowCr3Only,
             )
         }
     }

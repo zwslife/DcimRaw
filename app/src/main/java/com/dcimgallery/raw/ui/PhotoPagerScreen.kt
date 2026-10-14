@@ -175,7 +175,11 @@ fun PhotoPagerScreen(
         }
     }
     var comparingOriginal by remember(current?.uri) { mutableStateOf(false) }
-    val isCr3 = current?.source == "external"
+    LaunchedEffect(currentFileType) {
+        if (currentFileType != PhotoFileType.CR3) exportEmbedded = false
+    }
+    val canEdit = current != null
+    val canDeleteOriginal = current?.source == "external"
     val usbPhotos by produceState(emptySet<String>(), photos) { value = StorageOrigin.usbPhotos(context, photos) }
     val currentMasks = current?.let { masks[it.uri] }.orEmpty()
     var selectedMaskId by rememberSaveable(current?.uri) { mutableStateOf<String?>(null) }
@@ -293,9 +297,10 @@ fun PhotoPagerScreen(
                     Modifier
                         .fillMaxSize()
                         .padding(with(LocalDensity.current) {
-                            PaddingValues(top = if (uiVisible || showMasks) toolbarHeight.toDp() else 0.dp,
+                            // Chrome overlays fade without changing the image viewport.
+                            PaddingValues(top = toolbarHeight.toDp(),
                                 bottom = when { showMasks -> maskPanelDp; showTone -> tonePanelHeight.toDp()
-                                    showInfo -> infoHeight.toDp(); uiVisible && isCr3 -> dockHeight.toDp(); else -> 0.dp })
+                                    showInfo -> infoHeight.toDp(); else -> dockHeight.toDp() })
                         })
                         .onSizeChanged { if (isCurrent) gestureState.viewSize = it }
                         .clipToBounds()
@@ -508,7 +513,7 @@ fun PhotoPagerScreen(
                     Box {
                         StudioIconButton(StudioSymbol.Ellipsis, "更多", { showMore = true })
                         DropdownMenu(showMore, { showMore = false }) {
-                            if (isCr3) {
+                            if (canEdit) {
                                 DropdownMenuItem(text = { Text("复制调色参数") }, leadingIcon = { StudioIcon(StudioSymbol.Copy) },
                                     onClick = { current?.let { onCopyEdits(it.uri) }; showMore = false })
                                 DropdownMenuItem(text = { Text("粘贴调色参数") }, leadingIcon = { StudioIcon(StudioSymbol.Paste) },
@@ -516,7 +521,7 @@ fun PhotoPagerScreen(
                                     onClick = { current?.let { onPasteEdits(it.uri) }; showMore = false })
                                 DropdownMenuItem(text = { Text("复位全部调色") }, leadingIcon = { StudioIcon(StudioSymbol.RotateCcw) },
                                     onClick = { current?.let { onResetEdits(it.uri) }; showMore = false })
-                                DropdownMenuItem(text = { Text("删除原片", color = Color(0xFFBA1A1A)) },
+                                if (canDeleteOriginal) DropdownMenuItem(text = { Text("删除原片", color = Color(0xFFBA1A1A)) },
                                     leadingIcon = { StudioIcon(StudioSymbol.Trash2, tint = Color(0xFFBA1A1A)) },
                                     onClick = { showMore = false; showDeleteConfirm = true })
                             } else DropdownMenuItem(text = { Text("照片信息") }, onClick = { showMore = false; showInfo = true })
@@ -527,7 +532,7 @@ fun PhotoPagerScreen(
 
             // 底栏：调色 / 导出 / 删除动作胶囊（面板打开时收起）
             AnimatedVisibility(
-                visible = uiVisible && isCr3 && !showInfo && !showTone && !showMasks,
+                visible = uiVisible && canEdit && !showInfo && !showTone && !showMasks,
                 enter = fadeIn(),
                 exit = fadeOut(),
                 modifier = Modifier.align(Alignment.BottomCenter),
@@ -548,7 +553,7 @@ fun PhotoPagerScreen(
 
         if (curDecodedReady && !showInfo && (uiVisible || showTone || showMasks)) {
             val bottom = with(LocalDensity.current) {
-                when { showMasks -> maskPanelHeight.toDp(); showTone -> tonePanelHeight.toDp(); isCr3 -> dockHeight.toDp(); else -> 0.dp }
+                when { showMasks -> maskPanelHeight.toDp(); showTone -> tonePanelHeight.toDp(); else -> dockHeight.toDp() }
             }
             DisposableEffect(current?.uri) { onDispose { comparingOriginal = false } }
             Box(Modifier.align(Alignment.BottomEnd).padding(end = 12.dp, bottom = bottom + 12.dp)
@@ -676,7 +681,7 @@ fun PhotoPagerScreen(
                         Text(current.displayName, style = MaterialTheme.typography.titleSmall)
                         Spacer(Modifier.height(20.dp))
                         StudioChoice("调色后 JPEG", { exportEmbedded = false }, symbol = StudioSymbol.Palette, selected = !exportEmbedded)
-                        StudioChoice("RAW 内嵌 JPEG", { exportEmbedded = true }, symbol = StudioSymbol.Images, selected = exportEmbedded)
+                        if (currentFileType == PhotoFileType.CR3) StudioChoice("RAW 内嵌 JPEG", { exportEmbedded = true }, symbol = StudioSymbol.Images, selected = exportEmbedded)
                         Spacer(Modifier.height(12.dp))
                         ExifRow("格式", "JPEG")
                         ExifRow("尺寸", if (exportEmbedded) "机内预览尺寸" else "原始尺寸")
@@ -688,7 +693,7 @@ fun PhotoPagerScreen(
                 },
                 confirmButton = { Button(onClick = {
                     showExport = false
-                    if (exportEmbedded) onExportEmbedded(current) else onExport(current)
+                    if (exportEmbedded && currentFileType == PhotoFileType.CR3) onExportEmbedded(current) else onExport(current)
                 }, enabled = !exporting) { Text("导出到相册") } },
                 dismissButton = { TextButton(onClick = { showExport = false }) { Text("取消") } })
         }

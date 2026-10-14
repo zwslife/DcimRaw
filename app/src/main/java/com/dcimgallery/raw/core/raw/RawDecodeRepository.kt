@@ -42,11 +42,14 @@ class RawDecodeRepository(private val app: GalleryApp) {
             decodeMutex.withLock {
                 memCache.get(uriString)?.let { return@withLock it }
                 val file = DecodedCache.fileFor(uriString)
-                val bitmap = if (file.exists() && file.length() > 0) {
+                val type = runCatching { readFileType(uriString) }.getOrNull()
+                // Ordinary images are decoded from their original bytes, preserving
+                // transparency and avoiding a second lossy JPEG cache conversion.
+                val bitmap = if ((type == PhotoFileType.CR3 || type == null) && file.exists() && file.length() > 0) {
                     BitmapFactory.decodeFile(file.absolutePath)
                 } else {
-                    runCatching { decodeOnce(uriString) }.getOrNull()
-                        ?.also { DecodedCache.storeJpeg(file, it) }
+                    runCatching { decodeOnce(uriString, type == PhotoFileType.CR3) }.getOrNull()
+                        ?.also { if (type == PhotoFileType.CR3) DecodedCache.storeJpeg(file, it) }
                 }
                 bitmap?.let { memCache.put(uriString, it) }
                 bitmap
@@ -54,23 +57,45 @@ class RawDecodeRepository(private val app: GalleryApp) {
         }
     }
 
-    private fun decodeOnce(uriString: String): Bitmap {
+    private fun readFileType(uriString: String): PhotoFileType {
+        val uri = Uri.parse(uriString)
+        return app.contentResolver.openInputStream(uri)?.use { input ->
+            val header = ByteArray(12)
+            var count = 0
+            while (count < header.size) {
+                val n = input.read(header, count, header.size - count)
+                if (n <= 0) break
+                count += n
+            }
+            PhotoFileType.fromHeader(header.copyOf(count))
+        } ?: throw RuntimeException("无法读取图片")
+    }
+
+    private fun decodeOnce(uriString: String, isCr3: Boolean): Bitmap {
+        val uri = Uri.parse(uriString)
+        if (!isCr3) {
+            val decoded = app.contentResolver.openInputStream(uri)?.use { input ->
+                BitmapFactory.decodeStream(input, null, BitmapFactory.Options().apply {
+                    inPreferredConfig = Bitmap.Config.ARGB_8888
+                    inPreferredColorSpace = android.graphics.ColorSpace.get(android.graphics.ColorSpace.Named.SRGB)
+                })
+            } ?: throw RuntimeException("图片格式无法解码")
+            val matrix = runCatching {
+                app.contentResolver.openInputStream(uri)?.use { input ->
+                    val exif = ExifInterface(input)
+                    Matrix().apply {
+                        if (exif.isFlipped) postScale(-1f, 1f)
+                        postRotate(exif.rotationDegrees.toFloat())
+                    }
+                }
+            }.getOrNull()
+            if (matrix == null || matrix.isIdentity) return decoded
+            return Bitmap.createBitmap(decoded, 0, 0, decoded.width, decoded.height, matrix, true)
+                .also { corrected -> if (corrected !== decoded) decoded.recycle() }
+        }
         val pfd = app.contentResolver.openFileDescriptor(Uri.parse(uriString), "r")
             ?: throw RuntimeException("无法打开文件描述符")
         pfd.use {
-            val jpeg = Cr3Parser.open(it).readStandaloneJpeg()
-            if (jpeg != null) {
-                val decoded = BitmapFactory.decodeByteArray(jpeg, 0, jpeg.size)
-                    ?: throw RuntimeException("JPEG 解码失败")
-                val exif = ExifInterface(jpeg.inputStream())
-                val matrix = Matrix().apply {
-                    if (exif.isFlipped) postScale(-1f, 1f)
-                    postRotate(exif.rotationDegrees.toFloat())
-                }
-                if (matrix.isIdentity) return decoded
-                return Bitmap.createBitmap(decoded, 0, 0, decoded.width, decoded.height, matrix, true)
-                    .also { corrected -> if (corrected !== decoded) decoded.recycle() }
-            }
             val fd = it.detachFd() // 所有权移交 native（桥接层负责关闭）
             return RawDecoder.decodeFd(fd, false)
                 ?: throw RuntimeException("RAW 解码返回空")
@@ -121,7 +146,7 @@ class RawDecodeRepository(private val app: GalleryApp) {
     suspend fun exportJpeg(uriString: String, displayName: String, tone: ToneParams, masks: List<MaskLayer> = emptyList()): String? =
         withContext(Dispatchers.IO) {
             try {
-                val bitmap = decode(uriString) ?: return@withContext "RAW 解码失败"
+                val bitmap = decode(uriString) ?: return@withContext "图片解码失败"
                 val outBitmap = if (tone.isNeutral && masks.none { it.enabled && !it.tone.isNeutral }) {
                     bitmap
                 } else {

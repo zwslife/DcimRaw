@@ -3,6 +3,16 @@ package com.dcimgallery.raw.ui
 import androidx.compose.foundation.layout.*
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.window.Popup
+import androidx.compose.ui.window.PopupProperties
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.foundation.border
+import androidx.compose.foundation.selection.toggleable
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.draw.shadow
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
@@ -55,6 +65,7 @@ fun GridScreen(
     items: List<GridItem>, photoCount: Int, gridState: LazyGridState,
     scanning: Boolean, scanFound: Int, driveReadable: Boolean,
     onRefresh: () -> Unit, onChangeDir: () -> Unit, onOpen: (Int) -> Unit,
+    showCr3Only: Boolean, onShowCr3Only: (Boolean) -> Unit,
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val openPrivacy = LocalOpenPrivacyPolicy.current
@@ -67,12 +78,12 @@ fun GridScreen(
             Text("照片图库", Modifier.weight(1f), style = MaterialTheme.typography.headlineSmall, color = StudioColors.Ink)
             RefreshButton(scanning, onRefresh)
             StudioIconButton(StudioSymbol.FolderOpen, "选择目录", onChangeDir)
-            StudioIconButton(StudioSymbol.Info, "隐私政策", openPrivacy)
+            GallerySettings(showCr3Only, onShowCr3Only, openPrivacy)
         }
         if (items.isEmpty()) Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 StudioIcon(StudioSymbol.Images, Modifier.size(44.dp), tint = StudioColors.Muted)
-                Text(if (scanning) "正在查找照片…" else "选择目录，开始浏览照片", Modifier.padding(top = 16.dp), color = StudioColors.Muted)
+                Text(if (scanning) "正在查找照片…" else if (showCr3Only) "当前没有可显示的 CR3 照片" else "选择目录，开始浏览照片", Modifier.padding(top = 16.dp), color = StudioColors.Muted)
             }
         } else LazyVerticalGrid(columns = GridCells.Fixed(2), state = gridState,
             modifier = Modifier.fillMaxWidth().weight(1f), contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 20.dp),
@@ -92,6 +103,37 @@ fun GridScreen(
                             GridCell(item.photo, wide, item.photo.uri in usb) { onOpen(item.globalIndex) }
                         }
                     }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun GallerySettings(cr3Only: Boolean, onCr3Only: (Boolean) -> Unit, onPrivacy: () -> Unit) {
+    var opened by remember { mutableStateOf(false) }
+    val top = with(LocalDensity.current) { 48.dp.roundToPx() }
+    Box {
+        StudioIconButton(StudioSymbol.Settings, "图库设置", { opened = true }, selected = cr3Only)
+        if (opened) Popup(alignment = Alignment.TopEnd, offset = IntOffset(0, top),
+            onDismissRequest = { opened = false }, properties = PopupProperties(focusable = true)) {
+            Column(Modifier.width(240.dp).shadow(8.dp, RoundedCornerShape(16.dp))
+                .clip(RoundedCornerShape(16.dp)).background(Color.White).border(1.dp, StudioColors.Line, RoundedCornerShape(16.dp))
+                .padding(vertical = 8.dp)) {
+                Row(Modifier.fillMaxWidth().toggleable(value = cr3Only, role = Role.Switch, onValueChange = onCr3Only)
+                    .padding(horizontal = 16.dp, vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text("只显示 CR3", Modifier.weight(1f), color = StudioColors.Ink, style = MaterialTheme.typography.bodyMedium)
+                    Box(Modifier.width(38.dp).height(23.dp).clip(CircleShape)
+                        .background(if (cr3Only) StudioColors.Pine else StudioColors.Line).padding(3.dp)) {
+                        Box(Modifier.size(17.dp).align(if (cr3Only) Alignment.CenterEnd else Alignment.CenterStart)
+                            .clip(CircleShape).background(Color.White))
+                    }
+                }
+                Box(Modifier.fillMaxWidth().height(1.dp).background(StudioColors.Line))
+                Row(Modifier.fillMaxWidth().clickable { opened = false; onPrivacy() }.padding(horizontal = 16.dp, vertical = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically) {
+                    StudioIcon(StudioSymbol.Info, Modifier.size(18.dp), tint = StudioColors.Muted)
+                    Text("隐私政策", Modifier.padding(start = 10.dp), color = StudioColors.Ink, style = MaterialTheme.typography.bodyMedium)
                 }
             }
         }
