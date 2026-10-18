@@ -44,6 +44,10 @@ fun TonePanel(photoName: String, params: ToneParams, onParamsChange: (ToneParams
 internal fun ToneRows(section: Int, params: ToneParams, onChange: (ToneParams) -> Unit,
     scopeKey: String, onGesture: (Boolean) -> Unit) {
     var color by rememberSaveable(scopeKey) { mutableIntStateOf(0) }
+    if (section == 6) {
+        CurveEditor(params, onChange, scopeKey, onGesture)
+        return
+    }
     if (section == 2) EditorColorTabs(color, { color = it })
     if (section == 4) {
         listOf("阴影", "中间调", "高光", "全局").forEachIndexed { grade, name ->

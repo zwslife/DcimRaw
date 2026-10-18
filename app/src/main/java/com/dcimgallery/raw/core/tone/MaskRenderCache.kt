@@ -28,13 +28,13 @@ class MaskRenderCache {
             packedKeys = keys
         }
         val matrices = FloatArray(20 * active.size)
-        val luts = FloatArray(256 * active.size)
+        val luts = FloatArray(ToneParams.LUT_SIZE * active.size)
         val hsls = FloatArray(24 * active.size)
         val effects = FloatArray(ToneParams.EFFECT_COUNT * active.size)
         active.forEachIndexed { i, layer ->
             val data = layer.tone.toRenderData()
             data.matrix.copyInto(matrices, i * 20)
-            data.lut.copyInto(luts, i * 256)
+            data.lut.copyInto(luts, i * ToneParams.LUT_SIZE)
             data.hsl.copyInto(hsls, i * 24)
             data.effects.copyInto(effects, i * ToneParams.EFFECT_COUNT)
         }

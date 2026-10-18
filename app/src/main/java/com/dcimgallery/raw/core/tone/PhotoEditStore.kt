@@ -44,7 +44,7 @@ class PhotoEditStore(context: Context) {
 
     @Synchronized
     fun save(uri: String, edits: PhotoEdits) {
-        val root = JSONObject().put("version", 3).put("tone", toneJson(edits.tone))
+        val root = JSONObject().put("version", 4).put("tone", toneJson(edits.tone))
         root.put("masks", JSONArray().apply {
             edits.masks.forEach { mask -> put(JSONObject().put("id", mask.id).put("name", mask.name)
                 .put("inverted", mask.inverted).put("enabled", mask.enabled).put("tone", toneJson(mask.tone))
@@ -80,6 +80,11 @@ class PhotoEditStore(context: Context) {
         put("shadows", t.shadows.toDouble()); put("whites", t.whites.toDouble()); put("blacks", t.blacks.toDouble())
         put("hsl", JSONArray().apply { t.hsl.forEach { put(JSONArray().put(it.hue.toDouble()).put(it.sat.toDouble()).put(it.lum.toDouble())) } })
         put("effects", JSONArray().apply { t.effectsArray().forEach { put(it.toDouble()) } })
+        put("curves", JSONArray().apply {
+            t.curves.forEach { curve -> put(JSONArray().apply {
+                curve.normalized().points.forEach { put(JSONArray().put(it.x.toDouble()).put(it.y.toDouble())) }
+            }) }
+        })
     }
 
     private fun readTone(t: JSONObject): ToneParams {
@@ -91,7 +96,15 @@ class PhotoEditStore(context: Context) {
                 HslAdjust(a?.optDouble(0, 0.0)?.toFloat() ?: 0f,
                     a?.optDouble(1, 0.0)?.toFloat() ?: 0f, a?.optDouble(2, 0.0)?.toFloat() ?: 0f)
             })
-        return base.withEffects(t.optJSONArray("effects")?.let { values ->
+        val curves = t.optJSONArray("curves")
+        return base.copy(curves = List(4) { channel ->
+            val points = curves?.optJSONArray(channel)
+            ToneCurve(List(points?.length() ?: 0) { index ->
+                val point = points?.optJSONArray(index)
+                CurvePoint(point?.optDouble(0, Double.NaN)?.toFloat() ?: Float.NaN,
+                    point?.optDouble(1, Double.NaN)?.toFloat() ?: Float.NaN)
+            }).normalized()
+        }).withEffects(t.optJSONArray("effects")?.let { values ->
             val defaults = ToneParams().effectsArray()
             FloatArray(ToneParams.EFFECT_COUNT) { values.optDouble(it, defaults[it].toDouble()).toFloat() }
         } ?: ToneParams().effectsArray())

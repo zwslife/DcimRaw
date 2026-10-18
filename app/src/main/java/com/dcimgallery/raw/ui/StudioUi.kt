@@ -41,6 +41,7 @@ enum class StudioSymbol(val resource: Int) {
     Sparkles(R.drawable.studio_sparkles),
     Aperture(R.drawable.studio_aperture),
     Focus(R.drawable.studio_focus),
+    Curve(R.drawable.studio_curve),
     Check(R.drawable.studio_check),
     RotateCcw(R.drawable.studio_rotate_ccw),
     Undo2(R.drawable.studio_undo_2),

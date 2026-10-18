@@ -4,6 +4,22 @@ package com.dcimgallery.raw.core.tone
 fun main() {
     val neutral = ToneParams()
     check(neutral.isNeutral)
+    check(neutral.renderLut().size == 768)
+    neutral.renderLut().forEachIndexed { i, v -> check(kotlin.math.abs(v - i % 256) < .001f) }
+    val lift = ToneCurve(listOf(CurvePoint(0f, 0f), CurvePoint(.5f, .75f), CurvePoint(1f, 1f)))
+    val raised = neutral.copy(curves = listOf(lift, ToneCurve(), ToneCurve(), ToneCurve()))
+    check(!raised.isNeutral && raised.renderLut()[128] > 190f)
+    val redOnly = neutral.copy(curves = listOf(ToneCurve(), lift, ToneCurve(), ToneCurve())).renderLut()
+    check(redOnly[128] > 190f && kotlin.math.abs(redOnly[384] - 128f) < .001f && kotlin.math.abs(redOnly[640] - 128f) < .001f)
+    val sampled = lift.lut()
+    check(sampled.asList().zipWithNext().all { (a, b) -> a <= b })
+    val malformed = ToneCurve(listOf(CurvePoint(Float.NaN, 0f), CurvePoint(1f, Float.POSITIVE_INFINITY)))
+    check(malformed.normalized() == ToneCurve())
+    val inverse = ToneCurve(listOf(CurvePoint(0f, 1f), CurvePoint(1f, 0f))).lut()
+    check(inverse.first() == 255f && inverse.last() == 0f)
+    check(inverse.asList().zipWithNext().all { (a, b) -> a >= b })
+    val close = ToneCurve(listOf(CurvePoint(0f, 0f), CurvePoint(1e-30f, 1f), CurvePoint(1f, 1f)))
+    check(close.lut().all { it.isFinite() && it in 0f..255f })
     check(neutral.effectsArray().size == ToneParams.EFFECT_COUNT)
     check(neutral.withEffects(neutral.effectsArray()) == neutral)
     val rich = neutral.copy(vibrance = .31f, texture = -.42f, clarity = .53f, dehaze = .64f,

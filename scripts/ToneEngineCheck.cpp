@@ -9,7 +9,7 @@ using namespace dcim;
 RenderData defaults() {
     RenderData d;
     d.m[0]=d.m[6]=d.m[12]=d.m[18]=1.f;
-    for(int i=0;i<256;++i)d.lut[i]=static_cast<float>(i);
+    for(int i=0;i<768;++i)d.lut[i]=static_cast<float>(i%256);
     d.effects[VignetteMidpoint]=d.effects[VignetteFeather]=.5f;
     d.effects[GrainSize]=.25f;d.effects[GrainRoughness]=.5f;
     d.effects[SharpenRadius]=1.f;d.effects[SharpenDetail]=.25f;d.effects[GradeBlending]=.5f;
@@ -35,6 +35,18 @@ double difference(const std::vector<uint8_t>& a,const std::vector<uint8_t>& b) {
 void checks() {
     const int w=127,h=91;auto src=fixture(w,h);auto d=defaults();
     assert(render(src,w,h,d)==src);
+    // RGB tables must affect only their channel, and masks must use identical curves.
+    auto curve=d;
+    for(int i=0;i<256;++i)curve.lut[i]=std::min(255.f,i*1.3f);
+    assert(!isNeutralData(curve));
+    auto curved=render(src,w,h,curve);
+    assert(difference(curved,src)>.1);
+    for(size_t i=0;i<src.size();i+=3) {
+        assert(curved[i+1]==src[i+1] && curved[i+2]==src[i+2]);
+    }
+    auto maskedCurve=src;Analysis curveAnalysis;std::vector<uint8_t> curveCoverage(w*h,255);
+    renderMasks({maskedCurve.data(),w,h,w*3,3},{curve},curveCoverage.data(),w,h,curveAnalysis);
+    assert(maskedCurve==curved);
     const int indices[]={Vibrance,Texture,Clarity,Dehaze,Vignette,Grain,BlackWhite,Sharpening,Grades+1};
     for(int index:indices) {
         auto p=d;p.effects[index]=.85f;prepare(p);

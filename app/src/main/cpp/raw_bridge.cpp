@@ -215,9 +215,9 @@ bool sameData(const RenderData& a,const RenderData& b) {
 
 bool loadRenderData(JNIEnv* env,jfloatArray matrix,jfloatArray lut,jfloatArray hsl,jfloatArray effects,RenderData& d) {
     if(!matrix || !lut || !hsl || !effects || env->GetArrayLength(matrix)!=20 ||
-        env->GetArrayLength(lut)!=256 || env->GetArrayLength(hsl)!=24 || env->GetArrayLength(effects)!=EffectCount)return false;
+        env->GetArrayLength(lut)!=768 || env->GetArrayLength(hsl)!=24 || env->GetArrayLength(effects)!=EffectCount)return false;
     env->GetFloatArrayRegion(matrix,0,20,d.m);
-    env->GetFloatArrayRegion(lut,0,256,d.lut);
+    env->GetFloatArrayRegion(lut,0,768,d.lut);
     env->GetFloatArrayRegion(hsl,0,24,d.hsl);
     env->GetFloatArrayRegion(effects,0,EffectCount,d.effects);
     if(env->ExceptionCheck())return false;
@@ -388,14 +388,14 @@ Java_com_dcimgallery_raw_core_raw_RawDecoder_applyMasks(
     if(!matrices || !luts || !hsls || !effects || !coverage)return JNI_FALSE;
     const int count=env->GetArrayLength(matrices)/20;
     if(count==0)return JNI_TRUE;
-    if(mw<=0 || mh<=0 || env->GetArrayLength(matrices)!=count*20 || env->GetArrayLength(luts)!=count*256 ||
+    if(mw<=0 || mh<=0 || env->GetArrayLength(matrices)!=count*20 || env->GetArrayLength(luts)!=count*768 ||
         env->GetArrayLength(hsls)!=count*24 || env->GetArrayLength(effects)!=count*EffectCount ||
         static_cast<int64_t>(mw)*mh*count!=env->GetArrayLength(coverage))return JNI_FALSE;
     try {
         std::vector<RenderData> layers(count);
         for(int i=0;i<count;++i) {
             env->GetFloatArrayRegion(matrices,i*20,20,layers[i].m);
-            env->GetFloatArrayRegion(luts,i*256,256,layers[i].lut);
+            env->GetFloatArrayRegion(luts,i*768,768,layers[i].lut);
             env->GetFloatArrayRegion(hsls,i*24,24,layers[i].hsl);
             env->GetFloatArrayRegion(effects,i*EffectCount,EffectCount,layers[i].effects);
             prepare(layers[i]);

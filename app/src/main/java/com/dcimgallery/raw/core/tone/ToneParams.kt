@@ -3,6 +3,49 @@ package com.dcimgallery.raw.core.tone
 import kotlin.math.exp
 import kotlin.math.pow
 
+data class CurvePoint(val x: Float, val y: Float)
+
+/** Normalized point curve. Harmonic tangents avoid overshoot between control points. */
+data class ToneCurve(val points: List<CurvePoint> = listOf(CurvePoint(0f, 0f), CurvePoint(1f, 1f))) {
+    val isNeutral: Boolean get() = points.all { it.x == it.y }
+
+    fun normalized(): ToneCurve {
+        val valid = points.filter { it.x.isFinite() && it.y.isFinite() }
+            .map { CurvePoint(it.x.coerceIn(0f, 1f), it.y.coerceIn(0f, 1f)) }
+            .sortedBy { it.x }.distinctBy { it.x }.take(16)
+        if (valid.size < 2) return ToneCurve()
+        val middle = valid.filter { it.x >= .004f && it.x <= .996f }
+            .fold(emptyList<CurvePoint>()) { kept, point ->
+                if (kept.isEmpty() || point.x - kept.last().x >= .004f) kept + point else kept
+            }.take(14)
+        return ToneCurve(listOf(CurvePoint(0f, valid.first().y)) + middle + CurvePoint(1f, valid.last().y))
+    }
+
+    fun lut(): FloatArray {
+        val p = normalized().points
+        val h = FloatArray(p.size - 1) { p[it + 1].x - p[it].x }
+        val d = FloatArray(h.size) { (p[it + 1].y - p[it].y) / h[it] }
+        val m = FloatArray(p.size)
+        m[0] = d.first(); m[m.lastIndex] = d.last()
+        for (i in 1 until p.lastIndex) {
+            if (d[i - 1] * d[i] > 0f) {
+                val w1 = 2f * h[i] + h[i - 1]; val w2 = h[i] + 2f * h[i - 1]
+                m[i] = (w1 + w2) / (w1 / d[i - 1] + w2 / d[i])
+            }
+        }
+        var segment = 0
+        return FloatArray(256) { index ->
+            val x = index / 255f
+            while (segment < p.size - 2 && x > p[segment + 1].x) segment++
+            val t = ((x - p[segment].x) / h[segment]).coerceIn(0f, 1f)
+            val t2 = t * t; val t3 = t2 * t
+            ((2*t3 - 3*t2 + 1)*p[segment].y + (t3 - 2*t2 + t)*h[segment]*m[segment] +
+                (-2*t3 + 3*t2)*p[segment + 1].y + (t3 - t2)*h[segment]*m[segment + 1])
+                .coerceIn(0f, 1f) * 255f
+        }
+    }
+}
+
 /** 单个 HSL 颜色分区的调整量。 */
 data class HslAdjust(
     /** 色相偏移（-1..+1，映射 ±60°） */
@@ -68,13 +111,16 @@ data class ToneParams(
     val grading: List<ColorGrade> = List(4) { ColorGrade() },
     val gradingBalance: Float = 0f,
     val gradingBlending: Float = 0.5f,
+    /** Master RGB, red, green, blue point curves. */
+    val curves: List<ToneCurve> = List(4) { ToneCurve() },
 ) {
     val isNeutral: Boolean
         get() = exposure == 0f && contrast == 0f && temperature == 0f &&
             tint == 0f && saturation == 0f && highlights == 0f && shadows == 0f &&
             whites == 0f && blacks == 0f && hsl.all { it.isNeutral } &&
             vibrance == 0f && texture == 0f && clarity == 0f && dehaze == 0f &&
-            vignette == 0f && grain == 0f && !blackWhite && sharpening == 0f && grading.all { it.isNeutral }
+            vignette == 0f && grain == 0f && !blackWhite && sharpening == 0f && grading.all { it.isNeutral } &&
+            curves.all { it.isNeutral }
 
     /** 基础五项的 4x5 颜色矩阵（与预览 GPU/导出共用） */
     fun toMatrix(): FloatArray {
@@ -150,7 +196,18 @@ data class ToneParams(
         repeat(HSL_COUNT) { out[31 + it] = bwMix.getOrElse(it) { 0f } }
     }
 
-    fun toRenderData(): RenderData = RenderData(toMatrix(), toneLut(), hslArray(), effectsArray())
+    /** Compose base tone + master + channel curves once per edit, never per pixel. */
+    fun renderLut(): FloatArray {
+        val base = toneLut()
+        val tables = List(4) { curves.getOrElse(it) { ToneCurve() }.lut() }
+        fun sample(table: FloatArray, value: Float): Float {
+            val x = value.coerceIn(0f, 255f); val i = x.toInt()
+            return table[i] + (table[(i + 1).coerceAtMost(255)] - table[i]) * (x - i)
+        }
+        return FloatArray(LUT_SIZE) { i -> sample(tables[i / 256 + 1], sample(tables[0], base[i % 256])) }
+    }
+
+    fun toRenderData(): RenderData = RenderData(toMatrix(), renderLut(), hslArray(), effectsArray())
 
     /** 老照片缺失的项采用默认值；防止损坏的存档把 NaN 或越界值传入 native。 */
     fun withEffects(values: FloatArray): ToneParams {
@@ -170,6 +227,7 @@ data class ToneParams(
     companion object {
         const val HSL_COUNT = 8
         const val EFFECT_COUNT = 39
+        const val LUT_SIZE = 768
 
         /** 八分区中心色相（红橙黄绿青蓝紫品红） */
         val HSL_CENTERS = floatArrayOf(0f, 30f, 60f, 120f, 180f, 240f, 270f, 315f)

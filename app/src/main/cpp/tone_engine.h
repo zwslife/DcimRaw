@@ -12,7 +12,7 @@
 namespace dcim {
 struct RenderData {
     float m[20]{};
-    float lut[256]{};
+    float lut[768]{}; // Composed red, green, blue tables, 256 entries each.
     float hsl[24]{};  // 8 区 × [色相°, 饱和度Δ, 亮度Δ]
     bool hasHsl = false;
     float effects[39]{};
@@ -85,8 +85,8 @@ inline bool isNeutralData(const RenderData& d) {
     for (float v : d.hsl) {
         if (v != 0.f) return false;
     }
-    for (int i = 0; i < 256; i++) {
-        if (std::fabs(d.lut[i] - i) > 0.5f) return false;
+    for (int i = 0; i < 768; i++) {
+        if (std::fabs(d.lut[i] - (i % 256)) > 0.5f) return false;
     }
     // 矩阵是否单位阵（仅检查非对角偏移与增益）
     static const float ID[20] = {1,0,0,0,0, 0,1,0,0,0, 0,0,1,0,0, 0,0,0,1,0};
@@ -102,8 +102,8 @@ inline void processPixel(const RenderData& d, uint8_t& R, uint8_t& G, uint8_t& B
     float ng = d.m[5] * r + d.m[6] * g + d.m[7] * b + d.m[9];
     float nb = d.m[10] * r + d.m[11] * g + d.m[12] * b + d.m[14];
     nr = d.lut[clamp255(nr)];
-    ng = d.lut[clamp255(ng)];
-    nb = d.lut[clamp255(nb)];
+    ng = d.lut[256 + clamp255(ng)];
+    nb = d.lut[512 + clamp255(nb)];
 
     // 基础/色调调整无需经过 RGB↔HSL，尤其避免每帧数百万次取模与除法。
     if (!d.hasHsl) {

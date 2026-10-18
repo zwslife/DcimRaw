@@ -14,6 +14,7 @@ class PhotoEditClipboard {
 
     private fun ToneParams.detached() = copy(
         hsl = hsl.map { it.copy() }, bwMix = bwMix.toList(), grading = grading.map { it.copy() },
+        curves = curves.map { it.copy(points = it.points.map { point -> point.copy() }) },
     )
 
     private fun PhotoEdits.detached(newIds: Boolean) = PhotoEdits(tone.detached(), masks.map { layer ->
