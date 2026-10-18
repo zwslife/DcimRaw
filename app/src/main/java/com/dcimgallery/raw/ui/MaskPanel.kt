@@ -52,7 +52,7 @@ fun MaskPanel(
 ) {
     val selected = layers.firstOrNull { it.id == selectedId }
     val sections = remember { mutableStateMapOf<String, Int>() }
-    val section = sections[selectedId] ?: -1
+    val section = sections[selectedId]?.takeIf { it in -1..5 } ?: -1
     var dialog by remember { mutableStateOf<String?>(null) }
     var rename by rememberSaveable { mutableStateOf("") }
     val scroll = rememberScrollState()
@@ -111,7 +111,8 @@ fun MaskPanel(
                     if (snapshot.none { it.id == selectedId }) onSelect(snapshot.lastOrNull()?.id)
                 }
             }, canRedo = redo.isNotEmpty())
-            if (selected != null) EditorTabs(section, { sections[selected.id] = it }, includeRange = true)
+            if (selected != null) EditorTabs(section, { sections[selected.id] = it },
+                includeRange = true, includeCurves = false)
             Column(Modifier.weight(1f).verticalScroll(scroll).padding(horizontal = 18.dp, vertical = 6.dp)) {
                 if (layers.isNotEmpty()) {
                     Row(Modifier.fillMaxWidth().padding(bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {

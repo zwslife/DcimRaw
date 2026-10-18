@@ -66,14 +66,16 @@ internal fun EditorAction(symbol: StudioSymbol, label: String, onClick: () -> Un
 }
 
 @Composable
-internal fun EditorTabs(selected: Int, onSelect: (Int) -> Unit, includeRange: Boolean = false) {
+internal fun EditorTabs(selected: Int, onSelect: (Int) -> Unit, includeRange: Boolean = false,
+    includeCurves: Boolean = true) {
     val labels = listOf("光线", "色彩", "混色", "效果", "分级", "细节", "曲线")
     val icons = listOf(StudioSymbol.Sun, StudioSymbol.Palette, StudioSymbol.CircleDot,
         StudioSymbol.Sparkles, StudioSymbol.Aperture, StudioSymbol.Focus, StudioSymbol.Curve)
     val scroll = rememberScrollState()
     Column {
         Row(Modifier.fillMaxWidth().height(48.dp).horizontalScroll(scroll).padding(horizontal = 12.dp)) {
-            val indices = (if (includeRange) listOf(-1) else emptyList()) + listOf(0, 6, 1, 2, 3, 4, 5)
+            val indices = (if (includeRange) listOf(-1) else emptyList()) +
+                listOf(0) + (if (includeCurves) listOf(6) else emptyList()) + listOf(1, 2, 3, 4, 5)
             indices.forEach { index ->
                 val active = index == selected
                 val tint = if (active) EditorPine else EditorMuted
