@@ -39,6 +39,9 @@ interface PhotoDao {
     @Query("SELECT * FROM photos")
     suspend fun getAll(): List<PhotoEntity>
 
+    @Query("SELECT * FROM photos WHERE source = :source")
+    suspend fun getBySource(source: String): List<PhotoEntity>
+
     @Upsert
     suspend fun upsertAll(items: List<PhotoEntity>)
 

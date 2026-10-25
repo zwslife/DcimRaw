@@ -117,6 +117,7 @@ fun PhotoPagerScreen(
     initialIndex: Int,
     decodedMap: Map<String, Bitmap>,
     exporting: Boolean,
+    deleting: Boolean,
     toneParams: Map<String, ToneParams>,
     tonePreview: Pair<String, Bitmap>?,
     toneFull: Pair<String, Bitmap>?,
@@ -156,7 +157,6 @@ fun PhotoPagerScreen(
     var showInfo by rememberSaveable { mutableStateOf(false) }
     var showTone by rememberSaveable { mutableStateOf(false) }
     var showMasks by rememberSaveable { mutableStateOf(false) }
-    var showDeleteConfirm by rememberSaveable { mutableStateOf(false) }
     var uiVisible by rememberSaveable { mutableStateOf(true) }
     val context = LocalContext.current
     val viewerPreferences = remember(context) { context.getSharedPreferences("photo-viewer", Context.MODE_PRIVATE) }
@@ -179,7 +179,6 @@ fun PhotoPagerScreen(
         if (currentFileType != PhotoFileType.CR3) exportEmbedded = false
     }
     val canEdit = current != null
-    val canDeleteOriginal = current?.source == "external"
     val usbPhotos by produceState(emptySet<String>(), photos) { value = StorageOrigin.usbPhotos(context, photos) }
     val currentMasks = current?.let { masks[it.uri] }.orEmpty()
     var selectedMaskId by rememberSaveable(current?.uri) { mutableStateOf<String?>(null) }
@@ -521,16 +520,17 @@ fun PhotoPagerScreen(
                                     onClick = { current?.let { onPasteEdits(it.uri) }; showMore = false })
                                 DropdownMenuItem(text = { Text("复位全部调色") }, leadingIcon = { StudioIcon(StudioSymbol.RotateCcw) },
                                     onClick = { current?.let { onResetEdits(it.uri) }; showMore = false })
-                                if (canDeleteOriginal) DropdownMenuItem(text = { Text("删除原片", color = Color(0xFFBA1A1A)) },
+                                DropdownMenuItem(text = { Text("删除照片", color = DeleteRed) },
                                     leadingIcon = { StudioIcon(StudioSymbol.Trash2, tint = Color(0xFFBA1A1A)) },
-                                    onClick = { showMore = false; showDeleteConfirm = true })
+                                    enabled = !deleting,
+                                    onClick = { showMore = false; current?.let(onDelete) })
                             } else DropdownMenuItem(text = { Text("照片信息") }, onClick = { showMore = false; showInfo = true })
                         }
                     }
                 }
             }
 
-            // 底栏：调色 / 导出 / 删除动作胶囊（面板打开时收起）
+            // Four evenly spaced actions; deletion always goes through the shared confirmation.
             AnimatedVisibility(
                 visible = uiVisible && canEdit && !showInfo && !showTone && !showMasks,
                 enter = fadeIn(),
@@ -538,15 +538,17 @@ fun PhotoPagerScreen(
                 modifier = Modifier.align(Alignment.BottomCenter),
             ) {
                 Row(Modifier.fillMaxWidth().onSizeChanged { dockHeight = it.height }
-                    .background(Color.White).navigationBarsPadding().padding(horizontal = 36.dp, vertical = 8.dp),
+                    .background(Color.White).navigationBarsPadding().padding(horizontal = 16.dp, vertical = 8.dp),
                     horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
-                    StudioTool(StudioSymbol.Palette, "调色", { showTone = true; showInfo = false })
+                    StudioTool(StudioSymbol.Palette, "调色", { showTone = true; showInfo = false }, enabled = !deleting)
                     StudioTool(StudioSymbol.Scan, "蒙版", {
                         gestureState.reset(); showMasks = true; showTone = false; showInfo = false
                         maskAdjusting = false; maskOverlay = true; maskComponent = -1
-                    }, enabled = curDecodedReady)
+                    }, enabled = curDecodedReady && !deleting)
                     StudioTool(StudioSymbol.ArrowUpFromLine, if (exporting) "导出中…" else "导出",
-                        { showExport = true }, enabled = current != null && !exporting)
+                        { showExport = true }, enabled = current != null && !exporting && !deleting)
+                    StudioTool(StudioSymbol.Trash2, if (deleting) "删除中…" else "删除",
+                        { current?.let(onDelete) }, enabled = current != null && !deleting && !exporting, tint = DeleteRed)
                 }
             }
         }
@@ -698,33 +700,6 @@ fun PhotoPagerScreen(
                 dismissButton = { TextButton(onClick = { showExport = false }) { Text("取消") } })
         }
 
-        // 删除二次确认
-        if (showDeleteConfirm && current != null) {
-            AlertDialog(
-                onDismissRequest = { showDeleteConfirm = false },
-                title = { Text("删除原片") },
-                text = {
-                    Text(
-                        "将永久删除 ${current.displayName}" +
-                            "（${String.format(Locale.US, "%.1f", current.sizeBytes / 1048576f)} MB）。\n\n" +
-                            "此操作不可恢复，相机的原始 RAW 文件将被彻底移除。",
-                    )
-                },
-                confirmButton = {
-                    TextButton(
-                        onClick = {
-                            showDeleteConfirm = false
-                            onDelete(current)
-                        },
-                    ) {
-                        Text("永久删除", color = Color(0xFFBA1A1A))
-                    }
-                },
-                dismissButton = {
-                    TextButton(onClick = { showDeleteConfirm = false }) { Text("取消") }
-                },
-            )
-        }
     }
 }
 

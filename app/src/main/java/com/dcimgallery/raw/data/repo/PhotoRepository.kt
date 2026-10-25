@@ -9,6 +9,8 @@ import com.dcimgallery.raw.data.scan.MediaScanner
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 /** 照片索引仓库：合并本机相册（MediaStore）与外接盘 CR3（SAF）两个来源。 */
 class PhotoRepository(private val app: GalleryApp) {
@@ -16,6 +18,7 @@ class PhotoRepository(private val app: GalleryApp) {
     private val dao get() = app.db.photoDao()
     private val externalScanner = MediaScanner(app)
     private val localScanner = LocalMediaScanner(app)
+    private val indexing = Mutex()
 
     val photos: Flow<List<PhotoEntity>> = dao.observeAll()
 
@@ -29,6 +32,7 @@ class PhotoRepository(private val app: GalleryApp) {
         includeLocal: Boolean,
         onProgress: (found: Int) -> Unit = {},
     ): Int = withContext(Dispatchers.IO) {
+        indexing.withLock {
         updateIndex(dao.getAll(), PhotoEntity::uri, dao::upsertAll, prune = { missing ->
             app.db.withTransaction {
                 missing.chunked(400).forEach { dao.deleteByUris(it) }
@@ -40,6 +44,26 @@ class PhotoRepository(private val app: GalleryApp) {
                 publish(batch.map { PhotoEntity(it.uri.toString(), it.name, it.size,
                     it.lastModified, it.lastModified, it.folder, "external") })
             }
+        }
+        }
+    }
+
+    /** A MediaStore event must reconcile local rows even when an OTG volume is unavailable. */
+    suspend fun syncLocal(): Int = withContext(Dispatchers.IO) {
+        indexing.withLock {
+            updateIndex(dao.getBySource("local"), PhotoEntity::uri, dao::upsertAll, prune = { missing ->
+                app.db.withTransaction {
+                    missing.chunked(400).forEach { dao.deleteByUris(it) }
+                    app.db.photoFormatDao().deleteOrphans()
+                }
+            }, onProgress = {}) { publish -> localScanner.scan(publish) }
+        }
+    }
+
+    suspend fun remove(uris: Set<String>) = indexing.withLock {
+        app.db.withTransaction {
+            uris.toList().chunked(400).forEach { dao.deleteByUris(it) }
+            app.db.photoFormatDao().deleteOrphans()
         }
     }
 }

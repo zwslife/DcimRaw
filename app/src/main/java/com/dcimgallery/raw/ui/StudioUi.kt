@@ -80,6 +80,7 @@ enum class StudioSymbol(val resource: Int) {
     Scale(R.drawable.studio_scale),
     X(R.drawable.studio_x),
     ChevronRight(R.drawable.studio_chevron_right),
+    SquareCheck(R.drawable.studio_square_check),
     Images(R.drawable.studio_images);
 
 }
@@ -102,16 +103,17 @@ fun StudioIconButton(symbol: StudioSymbol, label: String, onClick: () -> Unit,
 
 @Composable
 fun StudioTool(symbol: StudioSymbol, label: String, onClick: () -> Unit,
-    modifier: Modifier = Modifier, selected: Boolean = false, primary: Boolean = false, enabled: Boolean = true) {
+    modifier: Modifier = Modifier, selected: Boolean = false, primary: Boolean = false, enabled: Boolean = true,
+    tint: Color? = null) {
     Column(modifier.widthIn(min = 52.dp).clip(RoundedCornerShape(12.dp)).clickable(enabled = enabled, onClick = onClick)
         .padding(horizontal = 4.dp, vertical = 6.dp), horizontalAlignment = Alignment.CenterHorizontally) {
         Box(Modifier.size(36.dp).clip(CircleShape).background(if (selected && primary) StudioColors.Pine
             else if (selected) StudioColors.Tint else Color.Transparent), contentAlignment = Alignment.Center) {
             StudioIcon(symbol, modifier = Modifier.size(22.dp), tint = if (!enabled) StudioColors.Muted.copy(alpha = .35f)
-                else if (selected && primary) Color.White else if (selected) StudioColors.Pine else StudioColors.Muted)
+                else tint ?: if (selected && primary) Color.White else if (selected) StudioColors.Pine else StudioColors.Muted)
         }
         Text(label, style = MaterialTheme.typography.labelSmall, maxLines = 1,
-            color = if (selected) StudioColors.Pine else StudioColors.Muted)
+            color = tint ?: if (selected) StudioColors.Pine else StudioColors.Muted)
     }
 }
 

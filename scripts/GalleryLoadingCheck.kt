@@ -44,5 +44,13 @@ fun main() = runBlocking {
     val small = ScanBatcher<Int> { batches += it }
     repeat(7) { small.add(it) }; small.flush(); small.flush()
     check(batches.single() == (0..6).toList())
+    val combined = mutableMapOf("local-stale" to Row("local-stale"), "otg-offline" to Row("otg-offline"))
+    updateIndex(listOf(combined.getValue("local-stale")), Row::uri,
+        { batch -> batch.forEach { combined[it.uri] = it } }, { keys -> keys.forEach(combined::remove) }, {}) { publish ->
+        publish(listOf(Row("local-new")))
+    }
+    check(combined.keys == setOf("otg-offline", "local-new")) {
+        "Local album reconciliation must remove deleted local rows without pruning an unavailable OTG source"
+    }
     println("PASS: 50,400 photos; first publish at 32; only 550 changed rows written; unchanged refresh writes 0; failure/cancellation never prune; $elapsed ms host reconciliation")
 }

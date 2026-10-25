@@ -24,6 +24,9 @@ import androidx.compose.ui.semantics.stateDescription
 import kotlinx.coroutines.isActive
 import android.net.Uri
 import androidx.compose.foundation.background
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -50,6 +53,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
@@ -60,13 +65,16 @@ import com.dcimgallery.raw.data.db.PhotoEntity
 import com.dcimgallery.raw.core.raw.PhotoFileType
 import com.dcimgallery.raw.core.raw.PhotoFormatProbe
 
-/** 白瓷图库：按日期保留分组，第一张照片作为横幅。 */
+/** White four-column gallery with stable URI selection and shared delete confirmation. */
 @Composable
 fun GridScreen(
     items: List<GridItem>, photoCount: Int, gridState: LazyGridState,
     scanning: Boolean, scanFound: Int, driveReadable: Boolean,
     onRefresh: () -> Unit, onChangeDir: () -> Unit, onOpen: (String) -> Unit,
     showCr3Only: Boolean, onShowCr3Only: (Boolean) -> Unit,
+    selecting: Boolean, selectedUris: Set<String>, deleting: Boolean,
+    onBeginSelection: (String?) -> Unit, onToggleSelection: (String) -> Unit,
+    onSelectAll: () -> Unit, onCancelSelection: () -> Unit, onDeleteSelected: () -> Unit,
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val openPrivacy = LocalOpenPrivacyPolicy.current
@@ -74,36 +82,59 @@ fun GridScreen(
     val usb by androidx.compose.runtime.produceState(emptySet<String>(), photos) {
         value = StorageOrigin.usbPhotos(context, photos)
     }
+    BackHandler(selecting) { if (!deleting) onCancelSelection() }
     Column(Modifier.fillMaxSize().background(Color.White).statusBarsPadding().navigationBarsPadding()) {
-        Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("照片图库", Modifier.weight(1f), style = MaterialTheme.typography.headlineSmall, color = StudioColors.Ink)
-            RefreshButton(scanning, onRefresh)
-            StudioIconButton(StudioSymbol.FolderOpen, "选择目录", onChangeDir)
-            GallerySettings(showCr3Only, onShowCr3Only, openPrivacy)
+        Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(if (selecting) "已选择 ${selectedUris.size} 张" else "照片", Modifier.weight(1f),
+                style = if (selecting) MaterialTheme.typography.titleMedium else MaterialTheme.typography.headlineSmall,
+                color = StudioColors.Ink)
+            if (selecting) {
+                Text("全选", color = StudioColors.Pine, fontSize = 14.sp,
+                    modifier = Modifier.clickable(enabled = !deleting, onClick = onSelectAll).padding(12.dp))
+                StudioIconButton(StudioSymbol.X, "取消多选", onCancelSelection, enabled = !deleting)
+            } else {
+                RefreshButton(scanning, onRefresh)
+                StudioIconButton(StudioSymbol.FolderOpen, "选择目录", onChangeDir)
+                StudioIconButton(StudioSymbol.SquareCheck, "选择照片", { onBeginSelection(null) }, enabled = photoCount > 0)
+                GallerySettings(showCr3Only, onShowCr3Only, openPrivacy)
+            }
         }
         if (items.isEmpty()) Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 StudioIcon(StudioSymbol.Images, Modifier.size(44.dp), tint = StudioColors.Muted)
                 Text(if (scanning) "正在查找照片…" else if (showCr3Only) "当前没有可显示的 CR3 照片" else "选择目录，开始浏览照片", Modifier.padding(top = 16.dp), color = StudioColors.Muted)
             }
-        } else LazyVerticalGrid(columns = GridCells.Fixed(2), state = gridState,
-            modifier = Modifier.fillMaxWidth().weight(1f), contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 20.dp),
-            horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        } else LazyVerticalGrid(columns = GridCells.Fixed(4), state = gridState,
+            modifier = Modifier.fillMaxWidth().weight(1f), contentPadding = PaddingValues(start = 2.dp, end = 2.dp, bottom = 16.dp),
+            horizontalArrangement = Arrangement.spacedBy(2.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             items(count = items.size, key = { index -> when (val item = items[index]) {
                 is GridItem.Header -> "header_${item.date}"
                 is GridItem.PhotoItem -> item.photo.uri
             } }, contentType = { index -> if (items[index] is GridItem.Header) "date" else "photo" },
-                span = { index -> GridItemSpan(if (items[index] is GridItem.Header ||
-                    (items[index] as? GridItem.PhotoItem)?.wide == true) maxLineSpan else 1) }) { index ->
+                span = { index -> GridItemSpan(if (items[index] is GridItem.Header) maxLineSpan else 1) }) { index ->
                 val item = items[index]
                 when (item) {
                     is GridItem.Header -> {
-                        Text(item.label, Modifier.padding(top = 8.dp, bottom = 2.dp), style = MaterialTheme.typography.labelMedium, color = StudioColors.Muted)
+                        Text(item.label, Modifier.padding(horizontal = 14.dp, vertical = 12.dp), style = MaterialTheme.typography.labelMedium, color = StudioColors.Muted)
                     }
                     is GridItem.PhotoItem -> {
-                        GridCell(item.photo, item.wide, item.photo.uri in usb) { onOpen(item.photo.uri) }
+                        GridCell(item.photo, item.photo.uri in usb, selecting, item.photo.uri in selectedUris, !deleting,
+                            onClick = { if (selecting) onToggleSelection(item.photo.uri) else onOpen(item.photo.uri) },
+                            onLongClick = { onBeginSelection(item.photo.uri) })
                     }
                 }
+            }
+        }
+        if (selecting) Row(Modifier.fillMaxWidth().background(Color.White).padding(horizontal = 18.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically) {
+            Text(if (selectedUris.isEmpty()) "选择要删除的照片" else "已选择 ${selectedUris.size} 张", Modifier.weight(1f),
+                color = StudioColors.Muted, fontSize = 13.sp)
+            Row(Modifier.clip(RoundedCornerShape(12.dp))
+                .background(DeleteRed.copy(alpha = if (selectedUris.isEmpty()) .35f else 1f))
+                .clickable(enabled = selectedUris.isNotEmpty() && !deleting, onClick = onDeleteSelected)
+                .padding(horizontal = 18.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                StudioIcon(StudioSymbol.Trash2, Modifier.size(18.dp), tint = Color.White)
+                Text(if (deleting) "删除中…" else "删除", Modifier.padding(start = 7.dp), color = Color.White, fontSize = 14.sp)
             }
         }
     }
@@ -158,7 +189,9 @@ private fun RefreshButton(scanning: Boolean, onRefresh: () -> Unit) {
 }
 
 @Composable
-private fun GridCell(photo: PhotoEntity, wide: Boolean, usb: Boolean, onClick: () -> Unit) {
+@OptIn(ExperimentalFoundationApi::class)
+private fun GridCell(photo: PhotoEntity, usb: Boolean, selecting: Boolean, chosen: Boolean, enabled: Boolean,
+    onClick: () -> Unit, onLongClick: () -> Unit) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val request = remember(context, photo.uri, photo.sizeBytes, photo.lastModified, photo.source) {
         ImageRequest.Builder(context).data(if (photo.source == "external")
@@ -168,16 +201,26 @@ private fun GridCell(photo: PhotoEntity, wide: Boolean, usb: Boolean, onClick: (
     val fileType by androidx.compose.runtime.produceState(PhotoFileType.UNKNOWN, photo.uri, photo.sizeBytes, photo.lastModified) {
         value = PhotoFormatProbe.read(context, photo.uri, photo.sizeBytes, photo.lastModified)
     }
-    Box(Modifier.aspectRatio(if (wide) 1.5f else 1f).clip(RoundedCornerShape(12.dp))
-        .background(StudioColors.Canvas).clickable(onClick = onClick)) {
+    Box(Modifier.aspectRatio(1f).clip(RoundedCornerShape(2.dp))
+        .background(StudioColors.Canvas).combinedClickable(enabled = enabled, onClick = onClick, onLongClick = onLongClick)
+        .semantics { selected = selecting && chosen }) {
         AsyncImage(model = request, contentDescription = photo.displayName,
             contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
-        if (fileType == PhotoFileType.CR3) Text("RAW", Modifier.align(Alignment.BottomStart).padding(10.dp)
-            .clip(RoundedCornerShape(4.dp)).background(Color.White.copy(alpha = .9f)).padding(horizontal = 6.dp, vertical = 2.dp),
-            style = MaterialTheme.typography.labelSmall, color = StudioColors.Ink)
-        if (usb) Box(Modifier.align(Alignment.BottomEnd).padding(10.dp).size(28.dp).clip(RoundedCornerShape(6.dp))
+        if (fileType == PhotoFileType.CR3) Text("RAW", Modifier.align(Alignment.BottomStart).padding(4.dp)
+            .clip(RoundedCornerShape(3.dp)).background(Color.White.copy(alpha = .9f)).padding(horizontal = 4.dp, vertical = 1.dp),
+            fontSize = 8.sp, color = StudioColors.Ink)
+        if (usb) Box(Modifier.align(Alignment.BottomEnd).padding(4.dp).size(20.dp).clip(RoundedCornerShape(4.dp))
             .background(Color.White.copy(alpha = .9f)), contentAlignment = Alignment.Center) {
-            StudioIcon(StudioSymbol.HardDrive, Modifier.size(18.dp), label = "OTG 存储")
+            StudioIcon(StudioSymbol.HardDrive, Modifier.size(13.dp), label = "OTG 存储")
+        }
+        if (selecting) {
+            if (chosen) Box(Modifier.fillMaxSize().background(StudioColors.Pine.copy(alpha = .13f))
+                .border(2.dp, StudioColors.Pine))
+            Box(Modifier.align(Alignment.TopEnd).padding(5.dp).size(20.dp).clip(CircleShape)
+                .background(if (chosen) StudioColors.Pine else Color.White.copy(alpha = .9f))
+                .border(1.dp, if (chosen) StudioColors.Pine else Color(0xFFBAC4BB), CircleShape), contentAlignment = Alignment.Center) {
+                if (chosen) StudioIcon(StudioSymbol.Check, Modifier.size(13.dp), tint = Color.White)
+            }
         }
     }
 }

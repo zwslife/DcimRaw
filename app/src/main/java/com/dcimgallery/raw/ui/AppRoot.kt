@@ -1,11 +1,13 @@
 package com.dcimgallery.raw.ui
 
 import android.Manifest
+import android.app.Activity
 import android.net.Uri
 import android.os.Build
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.result.IntentSenderRequest
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.material3.MaterialTheme
@@ -35,6 +37,31 @@ import kotlinx.coroutines.withContext
 @Composable
 fun AppRoot(viewModel: MainViewModel = viewModel()) {
     val context = LocalContext.current
+    var pendingDelete by remember { mutableStateOf<List<PhotoEntity>?>(null) }
+    var deleteAwaitingPermission by remember { mutableStateOf<List<PhotoEntity>?>(null) }
+    val deletePermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        val requested = deleteAwaitingPermission; deleteAwaitingPermission = null
+        if (granted && requested != null) viewModel.deletePhotos(requested)
+        else Toast.makeText(context, "未获得照片删除权限，照片未删除", Toast.LENGTH_SHORT).show()
+    }
+    val deleteAuthorizationLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) {
+        viewModel.onDeleteAuthorizationResult(it.resultCode == Activity.RESULT_OK)
+    }
+    val authorization by viewModel.deleteAuthorization.collectAsState()
+    LaunchedEffect(authorization?.id) {
+        authorization?.takeIf { !it.launched }?.let { request ->
+            viewModel.markDeleteAuthorizationLaunched(request.id)
+            try { deleteAuthorizationLauncher.launch(IntentSenderRequest.Builder(request.sender).build()) }
+            catch (_: Exception) { viewModel.onDeleteAuthorizationResult(false) }
+        }
+    }
+    fun confirmDeletion(requested: List<PhotoEntity>) {
+        if (Build.VERSION.SDK_INT <= 28 && requested.any { it.source == "local" } &&
+            ContextCompat.checkSelfPermission(context, Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
+            deleteAwaitingPermission = requested
+            deletePermissionLauncher.launch(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+        } else viewModel.deletePhotos(requested)
+    }
     var pendingExport by remember { mutableStateOf<Pair<PhotoEntity, Boolean>?>(null) }
     val exportPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
@@ -58,6 +85,7 @@ fun AppRoot(viewModel: MainViewModel = viewModel()) {
     DisposableEffect(lifecycleOwner, viewModel) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_STOP) viewModel.persistEdits()
+            if (event == Lifecycle.Event.ON_START) viewModel.onForeground()
         }
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
@@ -79,6 +107,9 @@ fun AppRoot(viewModel: MainViewModel = viewModel()) {
     val masks by viewModel.masks.collectAsState()
     val canPasteEdits by viewModel.canPasteEdits.collectAsState()
     val toast by viewModel.toast.collectAsState()
+    val selecting by viewModel.selecting.collectAsState()
+    val selectedUris by viewModel.selectedUris.collectAsState()
+    val deleting by viewModel.deleting.collectAsState()
 
     // 网格滚动状态提升到此处保活：进出大图页不丢失浏览位置
     val gridState = rememberLazyGridState()
@@ -120,6 +151,7 @@ fun AppRoot(viewModel: MainViewModel = viewModel()) {
                 initialIndex = selected,
                 decodedMap = decodedMap,
                 exporting = exporting,
+                deleting = deleting,
                 toneParams = toneParams,
                 tonePreview = tonePreview,
                 toneFull = toneFull,
@@ -137,7 +169,7 @@ fun AppRoot(viewModel: MainViewModel = viewModel()) {
                 onEnsureDecoded = viewModel::ensureDecoded,
                 onExport = { requestExport(it, false) },
                 onExportEmbedded = { requestExport(it, true) },
-                onDelete = viewModel::delete,
+                onDelete = { pendingDelete = listOf(it) },
                 onToneChange = viewModel::setTone,
                 onEnsureToneEngine = viewModel::ensureToneEngine,
                 onTonePanelDone = viewModel::renderToneFullDisplay,
@@ -156,7 +188,15 @@ fun AppRoot(viewModel: MainViewModel = viewModel()) {
                 onOpen = viewModel::openPhoto,
                 showCr3Only = showCr3Only,
                 onShowCr3Only = viewModel::setShowCr3Only,
+                selecting = selecting, selectedUris = selectedUris, deleting = deleting,
+                onBeginSelection = viewModel::enterSelection, onToggleSelection = viewModel::toggleSelection,
+                onSelectAll = viewModel::selectAllPhotos, onCancelSelection = viewModel::cancelSelection,
+                onDeleteSelected = { pendingDelete = photos.filter { it.uri in selectedUris } },
             )
+        }
+        pendingDelete?.takeIf { it.isNotEmpty() }?.let { requested ->
+            DeleteConfirmationDialog(requested.size, requested.singleOrNull()?.displayName,
+                onConfirm = { pendingDelete = null; confirmDeletion(requested) }, onDismiss = { pendingDelete = null })
         }
     }
 }

@@ -3,11 +3,16 @@ package com.dcimgallery.raw
 import android.Manifest
 import android.app.Application
 import android.content.pm.PackageManager
+import android.content.IntentSender
+import android.database.ContentObserver
 import android.graphics.Bitmap
 import android.net.Uri
 import android.os.Build
 import android.os.Process
+import android.os.Handler
+import android.os.Looper
 import android.provider.DocumentsContract
+import android.provider.MediaStore
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -25,6 +30,9 @@ import com.dcimgallery.raw.core.tone.PhotoEdits
 import com.dcimgallery.raw.core.tone.PhotoEditClipboard
 import com.dcimgallery.raw.data.db.PhotoEntity
 import com.dcimgallery.raw.data.repo.PhotoRepository
+import com.dcimgallery.raw.core.media.PhotoDeletion
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
@@ -41,6 +49,7 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -57,6 +66,8 @@ sealed interface GridItem {
     data class PhotoItem(val globalIndex: Int, val photo: PhotoEntity, val wide: Boolean = false) : GridItem
 }
 
+data class DeleteAuthorization(val id: Long, val sender: IntentSender, val launched: Boolean = false)
+
 @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 class MainViewModel(app: Application) : AndroidViewModel(app) {
 
@@ -66,6 +77,17 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     val showCr3Only: StateFlow<Boolean> = _showCr3Only
     private var filterMode: Boolean? = null
     private var filteredSnapshotReady = false
+    private val _selecting = MutableStateFlow(false)
+    val selecting: StateFlow<Boolean> = _selecting
+    private val _selectedUris = MutableStateFlow<Set<String>>(emptySet())
+    val selectedUris: StateFlow<Set<String>> = _selectedUris
+    private val _deleting = MutableStateFlow(false)
+    val deleting: StateFlow<Boolean> = _deleting
+    private val _deleteAuthorization = MutableStateFlow<DeleteAuthorization?>(null)
+    val deleteAuthorization: StateFlow<DeleteAuthorization?> = _deleteAuthorization
+    private var deleteConsent: CompletableDeferred<Boolean>? = null
+    private var consentId = 0L
+    private var currentPhotoUri: String? = null
 
     val photos: StateFlow<List<PhotoEntity>> =
         combine(repository.photos, _showCr3Only) { list, only -> list to only }
@@ -88,11 +110,21 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     if (emittedSize != matches.size) emit(matches.toList())
                     filteredSnapshotReady = true
                 }
+            }.onEach { list ->
+                if (_selectedUris.value.isNotEmpty()) {
+                    val visible = list.mapTo(HashSet()) { it.uri }
+                    _selectedUris.update { it.intersect(visible) }
+                }
+                val viewed = currentPhotoUri
+                if (selectedIndex.value >= 0 && viewed != null && list.none { it.uri == viewed }) {
+                    selectedIndex.value = -1; currentPhotoUri = null; onPagerPageChanged(null)
+                }
             }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     fun setShowCr3Only(enabled: Boolean) {
         if (_showCr3Only.value == enabled) return
         closePager()
+        cancelSelection()
         galleryPreferences.edit().putBoolean("cr3-only", enabled).apply()
         _showCr3Only.value = enabled
     }
@@ -225,10 +257,89 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     /** 一次性提示消息 */
     val toast = MutableStateFlow<String?>(null)
 
+    private var mediaSyncJob: Job? = null
+    private var externalSyncJob: Job? = null
+    private var mediaObserverRegistered = false
+    private val mediaObserver = object : ContentObserver(Handler(Looper.getMainLooper())) {
+        override fun onChange(selfChange: Boolean) = requestLocalSync()
+    }
+    private val externalObserver = object : ContentObserver(Handler(Looper.getMainLooper())) {
+        override fun onChange(selfChange: Boolean) {
+            requestExternalSync()
+        }
+    }
+
     init {
         checkMediaPermission()
         refreshDriveState()
+        registerMediaObserver()
+        observeExternal()
         rescan()
+    }
+
+    fun onForeground() {
+        checkMediaPermission()
+        registerMediaObserver()
+        if (_deleting.value) return
+        requestLocalSync()
+        if (_treeUri.value != null) rescan()
+    }
+
+    private fun requestLocalSync() {
+        if (!_hasMediaPermission.value) return
+        mediaSyncJob?.cancel()
+        mediaSyncJob = viewModelScope.launch {
+            delay(350)
+            if (_deleting.value) return@launch
+            try {
+                repository.syncLocal()
+                // The same file may also be visible through an authorized directory URI.
+                if (_treeUri.value != null) requestExternalSync()
+            }
+            catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) { /* Keep existing rows if the provider is temporarily unavailable. */ }
+        }
+    }
+
+    private fun registerMediaObserver() {
+        if (mediaObserverRegistered) return
+        runCatching {
+            getApplication<GalleryApp>().contentResolver.registerContentObserver(
+                MediaStore.Images.Media.EXTERNAL_CONTENT_URI, true, mediaObserver)
+            mediaObserverRegistered = true
+        }
+    }
+
+    private fun requestExternalSync() {
+        if (_treeUri.value == null) return
+        externalSyncJob?.cancel()
+        externalSyncJob = viewModelScope.launch {
+            delay(500)
+            scanJob?.join()
+            if (!_deleting.value) rescan()
+        }
+    }
+
+    private fun observeExternal() {
+        val resolver = getApplication<GalleryApp>().contentResolver
+        resolver.unregisterContentObserver(externalObserver)
+        _treeUri.value?.authority?.let { authority ->
+            runCatching { resolver.registerContentObserver(Uri.parse("content://$authority"), true, externalObserver) }
+        }
+    }
+
+    fun enterSelection(uri: String? = null) {
+        if (_deleting.value) return
+        _selecting.value = true
+        if (uri != null) _selectedUris.update { it + uri }
+    }
+    fun toggleSelection(uri: String) {
+        if (!_deleting.value) _selectedUris.update { if (uri in it) it - uri else it + uri }
+    }
+    fun selectAllPhotos() { if (!_deleting.value) _selectedUris.value = photos.value.mapTo(LinkedHashSet()) { it.uri } }
+    fun cancelSelection() {
+        if (_deleting.value) return
+        _selecting.value = false; _selectedUris.value = emptySet()
     }
 
     fun checkMediaPermission() {
@@ -244,12 +355,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun onMediaPermissionResult(granted: Boolean) {
         _hasMediaPermission.value = granted
-        if (granted) rescan()
+        if (granted) { registerMediaObserver(); rescan() }
     }
 
     fun onTreeGranted(uri: Uri) {
         SafManager.persist(getApplication(), uri)
         _treeUri.value = uri
+        observeExternal()
         refreshDriveState()
         rescan()
     }
@@ -263,6 +375,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun rescan() {
+        if (_deleting.value) return
         val tree = _treeUri.value
         val includeLocal = _hasMediaPermission.value
         if (tree == null && !includeLocal) return
@@ -296,12 +409,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun openPhoto(uri: String) {
         val index = photos.value.indexOfFirst { it.uri == uri }
-        if (index >= 0) openAt(index)
+        if (index >= 0) { currentPhotoUri = uri; openAt(index) }
     }
 
     fun closePager() {
         persistEdits()
         selectedIndex.value = -1
+        currentPhotoUri = null
     }
 
     /** All photo sources use the same decoded bitmap and editing pipeline. */
@@ -451,6 +565,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     /** 翻页：释放上一张的调色会话。 */
     fun onPagerPageChanged(uri: String?) {
+        currentPhotoUri = uri
         if (toneHandleUri != null && toneHandleUri != uri) {
             viewModelScope.launch(Dispatchers.Default) {
                 toneMutex.withLock {
@@ -502,34 +617,79 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    /** 从外接盘永久删除照片（SAF 写权限）。 */
-    fun delete(photo: PhotoEntity) {
-        val app = getApplication<GalleryApp>()
+    /** Called only after the application's explicit confirmation dialog. */
+    fun deletePhotos(requested: List<PhotoEntity>) {
+        if (_deleting.value || requested.isEmpty()) return
+        val targets = requested.distinctBy { it.uri }
+        _deleting.value = true
         viewModelScope.launch {
-            val ok = withContext(Dispatchers.IO) {
-                runCatching {
-                    DocumentsContract.deleteDocument(
-                        app.contentResolver, Uri.parse(photo.uri),
-                    )
-                }.getOrDefault(false)
-            }
-            if (ok) {
-                app.db.photoDao().deleteByUri(photo.uri)
-                PreviewCache.fileFor(photo.uri).delete()
-                PreviewCache.fileFor(com.dcimgallery.raw.core.coil.Cr3Image(Uri.parse(photo.uri),
-                    photo.sizeBytes, photo.lastModified).cacheKey).delete()
-                DecodedCache.fileFor(photo.uri).delete()
-                _decodedMap.update { it - photo.uri }
-                _decodingSet.update { it - photo.uri }
-                _toneParams.update { it - photo.uri }
-                _masks.update { it - photo.uri }
-                pendingSaves.remove(photo.uri)?.let { it.cancel(); it.join() }
-                withContext(Dispatchers.IO) { editStore.delete(photo.uri) }
-                toast.value = "已删除 ${photo.displayName}"
-            } else {
-                toast.value = "删除失败：请确认授权时包含了写权限（可重新授权外接目录）"
+            try {
+                scanJob?.cancelAndJoin()
+                mediaSyncJob?.cancelAndJoin()
+                externalSyncJob?.cancelAndJoin()
+                _scanning.value = false
+                val report = PhotoDeletion(getApplication()).delete(targets, ::authorizeDeletion) { deleted ->
+                    repository.remove(deleted)
+                    if (currentPhotoUri in deleted) { selectedIndex.value = -1; onPagerPageChanged(null) }
+                    _selectedUris.update { it - deleted }
+                    targets.filter { it.uri in deleted }.forEach { photo ->
+                        pendingSaves.remove(photo.uri)?.cancelAndJoin()
+                        loadingEdits.remove(photo.uri)?.cancelAndJoin()
+                        loadedEdits.remove(photo.uri)
+                        withContext(Dispatchers.IO) {
+                            runCatching {
+                                PreviewCache.fileFor(photo.uri).delete()
+                                PreviewCache.fileFor(com.dcimgallery.raw.core.coil.Cr3Image(Uri.parse(photo.uri),
+                                    photo.sizeBytes, photo.lastModified).cacheKey).delete()
+                                DecodedCache.fileFor(photo.uri).delete()
+                                editStore.delete(photo.uri)
+                            }
+                        }
+                    }
+                    _decodedMap.update { it - deleted }
+                    _decodingSet.update { it - deleted }
+                    _toneParams.update { it - deleted }
+                    _masks.update { it - deleted }
+                    if (tonePreview.value?.first in deleted) tonePreview.value = null
+                    if (toneFull.value?.first in deleted) toneFull.value = null
+                }
+                if (_selectedUris.value.isEmpty()) _selecting.value = false
+                toast.value = when {
+                    report.cancelled && report.deleted.isEmpty() -> "已取消删除"
+                    report.cancelled -> "已删除 ${report.deleted.size} 张，已取消后续删除"
+                    report.failed.isNotEmpty() -> "已删除 ${report.deleted.size} 张，${report.failed.size} 张未能删除，请检查删除授权或目录写入权限"
+                    else -> "已删除 ${report.deleted.size} 张照片"
+                }
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) { toast.value = "删除未完成，请刷新列表后重试" }
+            finally {
+                _deleteAuthorization.value = null; deleteConsent = null
+                _deleting.value = false
+                requestLocalSync()
             }
         }
+    }
+
+    private suspend fun authorizeDeletion(sender: IntentSender): Boolean {
+        val response = CompletableDeferred<Boolean>()
+        deleteConsent = response
+        _deleteAuthorization.value = DeleteAuthorization(++consentId, sender)
+        return try { response.await() } finally {
+            if (deleteConsent === response) { deleteConsent = null; _deleteAuthorization.value = null }
+        }
+    }
+
+    fun markDeleteAuthorizationLaunched(id: Long) {
+        _deleteAuthorization.update { if (it?.id == id) it.copy(launched = true) else it }
+    }
+    fun onDeleteAuthorizationResult(granted: Boolean) { deleteConsent?.complete(granted) }
+
+    override fun onCleared() {
+        val resolver = getApplication<GalleryApp>().contentResolver
+        resolver.unregisterContentObserver(mediaObserver)
+        resolver.unregisterContentObserver(externalObserver)
+        deleteConsent?.cancel()
+        super.onCleared()
     }
 
     fun toastShown() {
