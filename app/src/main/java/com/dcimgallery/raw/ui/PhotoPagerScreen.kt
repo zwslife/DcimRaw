@@ -284,9 +284,9 @@ fun PhotoPagerScreen(
                 val photo = photos[page]
                 val isCurrent = page == pagerState.currentPage
                 val isExternalPhoto = photo.source == "external"
-                val previewRequest = remember(photo.uri, isExternalPhoto, context) {
+                val previewRequest = remember(photo.uri, photo.sizeBytes, photo.lastModified, isExternalPhoto, context) {
                     ImageRequest.Builder(context)
-                        .data(if (isExternalPhoto) Cr3Image(Uri.parse(photo.uri)) else Uri.parse(photo.uri))
+                        .data(if (isExternalPhoto) Cr3Image(Uri.parse(photo.uri), photo.sizeBytes, photo.lastModified) else Uri.parse(photo.uri))
                         .allowHardware(false)
                         .build()
                 }

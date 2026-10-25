@@ -2,13 +2,14 @@ package com.dcimgallery.raw.data.scan
 
 import android.content.Context
 import android.net.Uri
-import androidx.documentfile.provider.DocumentFile
+import android.provider.DocumentsContract
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 /**
- * 外接盘目录树扫描器：递归遍历 SAF DocumentFile，收集所有 CR3 文件。
- * 纯增量友好：结果交给仓库层与 Room 比对 upsert。
+ * 授权目录扫描器：每个目录用一次 SAF 查询批量取得属性，分批交给索引仓库。
  */
 class MediaScanner(private val context: Context) {
 
@@ -20,38 +21,49 @@ class MediaScanner(private val context: Context) {
         val folder: String,
     )
 
-    suspend fun scan(treeUri: Uri, onProgress: (found: Int) -> Unit = {}): List<Found> =
+    suspend fun scan(treeUri: Uri, onBatch: suspend (List<Found>) -> Unit): Int =
         withContext(Dispatchers.IO) {
-            val root = DocumentFile.fromTreeUri(context, treeUri)
-                ?: return@withContext emptyList()
-            val out = ArrayList<Found>(1024)
-            val stack = ArrayList<Pair<DocumentFile, String>>()
-            stack.add(root to "")
+            var count = 0
+            val batches = ScanBatcher(onBatch)
+            val stack = ArrayList<Pair<String, String>>()
+            val visited = HashSet<String>()
+            stack.add(DocumentsContract.getTreeDocumentId(treeUri) to "")
+            val projection = arrayOf(DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+                DocumentsContract.Document.COLUMN_DISPLAY_NAME, DocumentsContract.Document.COLUMN_MIME_TYPE,
+                DocumentsContract.Document.COLUMN_SIZE, DocumentsContract.Document.COLUMN_LAST_MODIFIED)
             while (stack.isNotEmpty()) {
-                val (dir, path) = stack.removeAt(stack.size - 1)
-                val children = try {
-                    dir.listFiles()
-                } catch (e: Exception) {
-                    continue
-                }
-                for (doc in children) {
-                    val name = doc.name ?: continue
-                    if (doc.isDirectory) {
-                        stack.add(doc to if (path.isEmpty()) name else "$path/$name")
-                        continue
+                currentCoroutineContext().ensureActive()
+                val (documentId, path) = stack.removeAt(stack.size - 1)
+                if (!visited.add(documentId)) continue
+                val children = DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, documentId)
+                // A single provider query per directory supplies every required property.
+                // An unavailable subtree fails the scan, so reconciliation never deletes unseen files.
+                val cursor = context.contentResolver.query(children, projection, null, null, null)
+                    ?: error("无法读取授权目录")
+                cursor.use {
+                    val idColumn = it.getColumnIndexOrThrow(projection[0])
+                    val nameColumn = it.getColumnIndexOrThrow(projection[1])
+                    val mimeColumn = it.getColumnIndexOrThrow(projection[2])
+                    val sizeColumn = it.getColumnIndexOrThrow(projection[3])
+                    val modifiedColumn = it.getColumnIndexOrThrow(projection[4])
+                    while (it.moveToNext()) {
+                        currentCoroutineContext().ensureActive()
+                        val id = it.getString(idColumn) ?: continue
+                        val name = it.getString(nameColumn) ?: continue
+                        if (it.getString(mimeColumn) == DocumentsContract.Document.MIME_TYPE_DIR) {
+                            stack.add(id to if (path.isEmpty()) name else "$path/$name")
+                        } else if (name.endsWith(".cr3", ignoreCase = true)) {
+                            batches.add(Found(DocumentsContract.buildDocumentUriUsingTree(treeUri, id),
+                                name, it.getLong(sizeColumn), it.getLong(modifiedColumn), path))
+                            count++
+                        }
                     }
-                    if (name.endsWith(".cr3", ignoreCase = true)) {
-                        out += Found(
-                            uri = doc.uri,
-                            name = name,
-                            size = doc.length(),
-                            lastModified = doc.lastModified(),
-                            folder = path,
-                        )
-                        if (out.size % 50 == 0) onProgress(out.size)
+                    check(!it.extras.getBoolean(DocumentsContract.EXTRA_LOADING, false)) {
+                        "目录仍在加载，请稍后刷新"
                     }
                 }
             }
-            out
+            batches.flush()
+            count
         }
 }

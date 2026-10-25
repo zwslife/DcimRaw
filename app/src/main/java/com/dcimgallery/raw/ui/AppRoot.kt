@@ -153,7 +153,7 @@ fun AppRoot(viewModel: MainViewModel = viewModel()) {
                 driveReadable = driveReadable,
                 onRefresh = viewModel::rescan,
                 onChangeDir = { treeLauncher.launch(null) },
-                onOpen = viewModel::openAt,
+                onOpen = viewModel::openPhoto,
                 showCr3Only = showCr3Only,
                 onShowCr3Only = viewModel::setShowCr3Only,
             )

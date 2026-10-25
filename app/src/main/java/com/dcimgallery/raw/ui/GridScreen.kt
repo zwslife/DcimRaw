@@ -52,6 +52,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
+import coil.request.ImageRequest
 import com.dcimgallery.raw.GridItem
 import com.dcimgallery.raw.R
 import com.dcimgallery.raw.core.coil.Cr3Image
@@ -64,7 +65,7 @@ import com.dcimgallery.raw.core.raw.PhotoFormatProbe
 fun GridScreen(
     items: List<GridItem>, photoCount: Int, gridState: LazyGridState,
     scanning: Boolean, scanFound: Int, driveReadable: Boolean,
-    onRefresh: () -> Unit, onChangeDir: () -> Unit, onOpen: (Int) -> Unit,
+    onRefresh: () -> Unit, onChangeDir: () -> Unit, onOpen: (String) -> Unit,
     showCr3Only: Boolean, onShowCr3Only: (Boolean) -> Unit,
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
@@ -88,20 +89,19 @@ fun GridScreen(
         } else LazyVerticalGrid(columns = GridCells.Fixed(2), state = gridState,
             modifier = Modifier.fillMaxWidth().weight(1f), contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 20.dp),
             horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            var indexInGroup = 0
-            items.forEach { item ->
+            items(count = items.size, key = { index -> when (val item = items[index]) {
+                is GridItem.Header -> "header_${item.date}"
+                is GridItem.PhotoItem -> item.photo.uri
+            } }, contentType = { index -> if (items[index] is GridItem.Header) "date" else "photo" },
+                span = { index -> GridItemSpan(if (items[index] is GridItem.Header ||
+                    (items[index] as? GridItem.PhotoItem)?.wide == true) maxLineSpan else 1) }) { index ->
+                val item = items[index]
                 when (item) {
                     is GridItem.Header -> {
-                        indexInGroup = 0
-                        item(key = "header_${item.date}", span = { GridItemSpan(maxLineSpan) }) {
-                            Text(item.label, Modifier.padding(top = 8.dp, bottom = 2.dp), style = MaterialTheme.typography.labelMedium, color = StudioColors.Muted)
-                        }
+                        Text(item.label, Modifier.padding(top = 8.dp, bottom = 2.dp), style = MaterialTheme.typography.labelMedium, color = StudioColors.Muted)
                     }
                     is GridItem.PhotoItem -> {
-                        val wide = indexInGroup++ == 0
-                        item(key = item.photo.uri, span = { GridItemSpan(if (wide) 2 else 1) }) {
-                            GridCell(item.photo, wide, item.photo.uri in usb) { onOpen(item.globalIndex) }
-                        }
+                        GridCell(item.photo, item.wide, item.photo.uri in usb) { onOpen(item.photo.uri) }
                     }
                 }
             }
@@ -160,13 +160,17 @@ private fun RefreshButton(scanning: Boolean, onRefresh: () -> Unit) {
 @Composable
 private fun GridCell(photo: PhotoEntity, wide: Boolean, usb: Boolean, onClick: () -> Unit) {
     val context = androidx.compose.ui.platform.LocalContext.current
+    val request = remember(context, photo.uri, photo.sizeBytes, photo.lastModified, photo.source) {
+        ImageRequest.Builder(context).data(if (photo.source == "external")
+            Cr3Image(Uri.parse(photo.uri), photo.sizeBytes, photo.lastModified) else Uri.parse(photo.uri))
+            .crossfade(false).build()
+    }
     val fileType by androidx.compose.runtime.produceState(PhotoFileType.UNKNOWN, photo.uri, photo.sizeBytes, photo.lastModified) {
         value = PhotoFormatProbe.read(context, photo.uri, photo.sizeBytes, photo.lastModified)
     }
     Box(Modifier.aspectRatio(if (wide) 1.5f else 1f).clip(RoundedCornerShape(12.dp))
         .background(StudioColors.Canvas).clickable(onClick = onClick)) {
-        val raw = photo.source == "external"
-        AsyncImage(model = if (raw) Cr3Image(Uri.parse(photo.uri)) else Uri.parse(photo.uri), contentDescription = photo.displayName,
+        AsyncImage(model = request, contentDescription = photo.displayName,
             contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
         if (fileType == PhotoFileType.CR3) Text("RAW", Modifier.align(Alignment.BottomStart).padding(10.dp)
             .clip(RoundedCornerShape(4.dp)).background(Color.White.copy(alpha = .9f)).padding(horizontal = 6.dp, vertical = 2.dp),

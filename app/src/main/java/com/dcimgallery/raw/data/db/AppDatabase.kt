@@ -4,6 +4,9 @@ import android.content.Context
 import androidx.room.Dao
 import androidx.room.Database
 import androidx.room.Entity
+import androidx.room.Index
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 import androidx.room.PrimaryKey
 import androidx.room.Query
 import androidx.room.Room
@@ -12,7 +15,7 @@ import androidx.room.Upsert
 import kotlinx.coroutines.flow.Flow
 
 /** 一张被索引的照片（本机相册或外接盘 CR3）。 */
-@Entity(tableName = "photos")
+@Entity(tableName = "photos", indices = [Index(value = ["takenAt", "displayName", "uri"])])
 data class PhotoEntity(
     /** 本机为 MediaStore content uri，外接为 SAF document uri */
     @PrimaryKey val uri: String,
@@ -30,14 +33,20 @@ data class PhotoEntity(
 @Dao
 interface PhotoDao {
 
-    @Query("SELECT * FROM photos ORDER BY takenAt DESC, displayName DESC")
+    @Query("SELECT * FROM photos ORDER BY takenAt DESC, displayName DESC, uri DESC")
     fun observeAll(): Flow<List<PhotoEntity>>
+
+    @Query("SELECT * FROM photos")
+    suspend fun getAll(): List<PhotoEntity>
 
     @Upsert
     suspend fun upsertAll(items: List<PhotoEntity>)
 
     @Query("DELETE FROM photos WHERE uri = :uri")
     suspend fun deleteByUri(uri: String)
+
+    @Query("DELETE FROM photos WHERE uri IN (:uris)")
+    suspend fun deleteByUris(uris: List<String>)
 
     @Query("DELETE FROM photos")
     suspend fun clear()
@@ -46,14 +55,22 @@ interface PhotoDao {
     suspend fun count(): Int
 }
 
-@Database(entities = [PhotoEntity::class], version = 2, exportSchema = false)
+@Database(entities = [PhotoEntity::class, PhotoFormatEntity::class], version = 3, exportSchema = false)
 abstract class AppDatabase : RoomDatabase() {
 
     abstract fun photoDao(): PhotoDao
+    abstract fun photoFormatDao(): PhotoFormatDao
 
     companion object {
         @Volatile
         private var instance: AppDatabase? = null
+
+        private val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_photos_takenAt_displayName_uri ON photos(takenAt, displayName, uri)")
+                db.execSQL("CREATE TABLE IF NOT EXISTS photo_formats (uri TEXT NOT NULL PRIMARY KEY, sizeBytes INTEGER NOT NULL, lastModified INTEGER NOT NULL, format TEXT NOT NULL)")
+            }
+        }
 
         fun build(context: Context): AppDatabase =
             instance ?: synchronized(this) {
@@ -61,7 +78,7 @@ abstract class AppDatabase : RoomDatabase() {
                     context.applicationContext,
                     AppDatabase::class.java,
                     "dcimraw.db",
-                ).fallbackToDestructiveMigration().build().also { instance = it }
+                ).addMigrations(MIGRATION_2_3).fallbackToDestructiveMigration().build().also { instance = it }
             }
     }
 }

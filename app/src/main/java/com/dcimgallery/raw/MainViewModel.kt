@@ -35,6 +35,10 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.mapLatest
+import kotlinx.coroutines.flow.transformLatest
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -50,7 +54,7 @@ import com.dcimgallery.raw.core.raw.PhotoFileType
 /** 网格元素：日期分组头或照片。 */
 sealed interface GridItem {
     data class Header(val date: LocalDate, val label: String) : GridItem
-    data class PhotoItem(val globalIndex: Int, val photo: PhotoEntity) : GridItem
+    data class PhotoItem(val globalIndex: Int, val photo: PhotoEntity, val wide: Boolean = false) : GridItem
 }
 
 @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
@@ -60,14 +64,29 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val galleryPreferences = app.getSharedPreferences("gallery-settings", android.content.Context.MODE_PRIVATE)
     private val _showCr3Only = MutableStateFlow(galleryPreferences.getBoolean("cr3-only", false))
     val showCr3Only: StateFlow<Boolean> = _showCr3Only
+    private var filterMode: Boolean? = null
+    private var filteredSnapshotReady = false
 
     val photos: StateFlow<List<PhotoEntity>> =
         combine(repository.photos, _showCr3Only) { list, only -> list to only }
-            .mapLatest { (list, only) ->
-                if (!only) list else withContext(Dispatchers.IO) {
-                    list.filter { photo ->
-                        PhotoFormatProbe.read(app, photo.uri, photo.sizeBytes, photo.lastModified) == PhotoFileType.CR3
+            .transformLatest { (list, only) ->
+                if (filterMode != only) { filterMode = only; filteredSnapshotReady = false }
+                val incremental = !filteredSnapshotReady
+                if (!only) { emit(list); filteredSnapshotReady = true } else {
+                    val matches = ArrayList<PhotoEntity>()
+                    var emittedSize = -1
+                    var lastEmission = 0L
+                    list.chunked(256).forEach { batch ->
+                        val types = PhotoFormatProbe.readBatch(app, batch)
+                        batch.forEachIndexed { i, photo -> if (types[i] == PhotoFileType.CR3) matches += photo }
+                        val now = android.os.SystemClock.uptimeMillis()
+                        if (incremental && matches.size > 0 && matches.size != emittedSize &&
+                            (emittedSize < 0 || now - lastEmission >= 100L)) {
+                            emit(matches.toList()); emittedSize = matches.size; lastEmission = now
+                        }
                     }
+                    if (emittedSize != matches.size) emit(matches.toList())
+                    filteredSnapshotReady = true
                 }
             }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
@@ -80,7 +99,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     /** 按拍摄日期分组后的网格项（保持 photos 的倒序） */
     val gridItems: StateFlow<List<GridItem>> = photos
-        .map(::buildGridItems)
+        .mapLatest { list -> withContext(Dispatchers.Default) { buildGridItems(list) } }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     private val _scanning = MutableStateFlow(false)
@@ -88,6 +107,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     private val _scanFound = MutableStateFlow(0)
     val scanFound: StateFlow<Int> = _scanFound
+    private var scanJob: Job? = null
+    private var scanSource: Pair<Uri?, Boolean>? = null
+    private var scanGeneration = 0
 
     /** 已授权的外接盘目录树（可能暂时未挂载） */
     private val _treeUri = MutableStateFlow(SafManager.persistedUri(app))
@@ -234,27 +256,47 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun refreshDriveState() {
         val uri = _treeUri.value
-        _driveReadable.value = uri != null && SafManager.isReadable(getApplication(), uri)
+        viewModelScope.launch {
+            val readable = withContext(Dispatchers.IO) { uri != null && SafManager.isReadable(getApplication(), uri) }
+            if (_treeUri.value == uri) _driveReadable.value = readable
+        }
     }
 
     fun rescan() {
         val tree = _treeUri.value
         val includeLocal = _hasMediaPermission.value
         if (tree == null && !includeLocal) return
-        if (_scanning.value) return
-        viewModelScope.launch {
-            _scanning.value = true
+        val source = tree to includeLocal
+        if (_scanning.value && scanSource == source) return
+        val previousScan = scanJob
+        previousScan?.cancel()
+        scanSource = source
+        val generation = ++scanGeneration
+        _scanning.value = true
+        scanJob = viewModelScope.launch {
             _scanFound.value = 0
             try {
-                repository.rescan(tree, includeLocal) { found -> _scanFound.value = found }
+                previousScan?.join()
+                repository.rescan(tree, includeLocal) { found ->
+                    if (scanGeneration == generation) _scanFound.value = found
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                if (scanGeneration == generation) toast.value = "照片刷新未完成，已保留现有列表：${error.message.orEmpty()}"
             } finally {
-                _scanning.value = false
+                if (scanGeneration == generation) _scanning.value = false
             }
         }
     }
 
     fun openAt(index: Int) {
         selectedIndex.value = index
+    }
+
+    fun openPhoto(uri: String) {
+        val index = photos.value.indexOfFirst { it.uri == uri }
+        if (index >= 0) openAt(index)
     }
 
     fun closePager() {
@@ -474,6 +516,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             if (ok) {
                 app.db.photoDao().deleteByUri(photo.uri)
                 PreviewCache.fileFor(photo.uri).delete()
+                PreviewCache.fileFor(com.dcimgallery.raw.core.coil.Cr3Image(Uri.parse(photo.uri),
+                    photo.sizeBytes, photo.lastModified).cacheKey).delete()
                 DecodedCache.fileFor(photo.uri).delete()
                 _decodedMap.update { it - photo.uri }
                 _decodingSet.update { it - photo.uri }
@@ -492,17 +536,19 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         toast.value = null
     }
 
-    private fun buildGridItems(list: List<PhotoEntity>): List<GridItem> {
+    private suspend fun buildGridItems(list: List<PhotoEntity>): List<GridItem> {
         val out = ArrayList<GridItem>(list.size + 16)
         var lastDate: LocalDate? = null
         val zone = ZoneId.systemDefault()
         list.forEachIndexed { index, photo ->
+            if (index % 256 == 0) currentCoroutineContext().ensureActive()
             val date = Instant.ofEpochMilli(photo.takenAt).atZone(zone).toLocalDate()
-            if (date != lastDate) {
+            val firstInGroup = date != lastDate
+            if (firstInGroup) {
                 out += GridItem.Header(date, formatDateLabel(date))
                 lastDate = date
             }
-            out += GridItem.PhotoItem(index, photo)
+            out += GridItem.PhotoItem(index, photo, wide = firstInGroup)
         }
         return out
     }

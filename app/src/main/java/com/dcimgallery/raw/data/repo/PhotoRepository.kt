@@ -7,6 +7,8 @@ import com.dcimgallery.raw.data.db.PhotoEntity
 import com.dcimgallery.raw.data.scan.LocalMediaScanner
 import com.dcimgallery.raw.data.scan.MediaScanner
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 /** 照片索引仓库：合并本机相册（MediaStore）与外接盘 CR3（SAF）两个来源。 */
 class PhotoRepository(private val app: GalleryApp) {
@@ -18,7 +20,7 @@ class PhotoRepository(private val app: GalleryApp) {
     val photos: Flow<List<PhotoEntity>> = dao.observeAll()
 
     /**
-     * 全量重建索引（事务性清表+写入）。
+     * 分批增量更新；仅在两个来源均成功遍历后清理消失的记录。
      * @param treeUri 外接盘目录（null 表示未授权）
      * @param includeLocal 是否包含本机相册
      */
@@ -26,28 +28,18 @@ class PhotoRepository(private val app: GalleryApp) {
         treeUri: Uri?,
         includeLocal: Boolean,
         onProgress: (found: Int) -> Unit = {},
-    ): Int {
-        val local = if (includeLocal) localScanner.scan() else emptyList()
-        val external = if (treeUri != null) {
-            externalScanner.scan(treeUri) { found -> onProgress(local.size + found) }
-        } else {
-            emptyList()
+    ): Int = withContext(Dispatchers.IO) {
+        updateIndex(dao.getAll(), PhotoEntity::uri, dao::upsertAll, prune = { missing ->
+            app.db.withTransaction {
+                missing.chunked(400).forEach { dao.deleteByUris(it) }
+                app.db.photoFormatDao().deleteOrphans()
+            }
+        }, onProgress = onProgress) { publish ->
+            if (includeLocal) localScanner.scan(publish)
+            if (treeUri != null) externalScanner.scan(treeUri) { batch ->
+                publish(batch.map { PhotoEntity(it.uri.toString(), it.name, it.size,
+                    it.lastModified, it.lastModified, it.folder, "external") })
+            }
         }
-        val entities = local + external.map {
-            PhotoEntity(
-                uri = it.uri.toString(),
-                displayName = it.name,
-                sizeBytes = it.size,
-                lastModified = it.lastModified,
-                takenAt = it.lastModified,
-                folder = it.folder,
-                source = "external",
-            )
-        }
-        app.db.withTransaction {
-            dao.clear()
-            dao.upsertAll(entities)
-        }
-        return entities.size
     }
 }
