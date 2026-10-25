@@ -2,6 +2,10 @@ package com.dcimgallery.raw.ui
 
 import android.Manifest
 import android.app.Activity
+import android.content.Intent
+import android.content.Context
+import android.provider.MediaStore
+import android.provider.Settings
 import android.net.Uri
 import android.os.Build
 import android.widget.Toast
@@ -39,6 +43,31 @@ fun AppRoot(viewModel: MainViewModel = viewModel()) {
     val context = LocalContext.current
     var pendingDelete by remember { mutableStateOf<List<PhotoEntity>?>(null) }
     var deleteAwaitingPermission by remember { mutableStateOf<List<PhotoEntity>?>(null) }
+    val deletionPreferences = remember(context) { context.getSharedPreferences("photo-deletion", Context.MODE_PRIVATE) }
+    var showMediaManagement by remember { mutableStateOf(false) }
+    var deleteAfterManagement by remember { mutableStateOf<List<PhotoEntity>?>(null) }
+    fun canManageMedia() = Build.VERSION.SDK_INT >= 31 && runCatching { MediaStore.canManageMedia(context) }.getOrDefault(false)
+    var mediaManagementGranted by remember { mutableStateOf(canManageMedia()) }
+    val mediaManagementLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+        mediaManagementGranted = canManageMedia()
+        val requested = deleteAfterManagement
+        deleteAfterManagement = null
+        // Returning from settings is not proof of a grant. MediaStore still enforces consent.
+        if (requested != null) viewModel.deletePhotos(requested)
+    }
+    fun openMediaManagement() {
+        if (Build.VERSION.SDK_INT < 31) return
+        deletionPreferences.edit().putBoolean("management-explained", true).apply()
+        showMediaManagement = false
+        try {
+            mediaManagementLauncher.launch(Intent(Settings.ACTION_REQUEST_MANAGE_MEDIA, Uri.parse("package:${context.packageName}")))
+        } catch (_: Exception) {
+            Toast.makeText(context, "此设备不支持此授权入口，仍可逐次确认删除", Toast.LENGTH_SHORT).show()
+            val requested = deleteAfterManagement
+            deleteAfterManagement = null
+            if (requested != null) viewModel.deletePhotos(requested)
+        }
+    }
     val deletePermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         val requested = deleteAwaitingPermission; deleteAwaitingPermission = null
         if (granted && requested != null) viewModel.deletePhotos(requested)
@@ -60,6 +89,10 @@ fun AppRoot(viewModel: MainViewModel = viewModel()) {
             ContextCompat.checkSelfPermission(context, Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
             deleteAwaitingPermission = requested
             deletePermissionLauncher.launch(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+        } else if (Build.VERSION.SDK_INT >= 31 && requested.any { it.source == "local" } &&
+            !canManageMedia() && !deletionPreferences.getBoolean("management-explained", false)) {
+            deleteAfterManagement = requested
+            showMediaManagement = true
         } else viewModel.deletePhotos(requested)
     }
     var pendingExport by remember { mutableStateOf<Pair<PhotoEntity, Boolean>?>(null) }
@@ -85,7 +118,10 @@ fun AppRoot(viewModel: MainViewModel = viewModel()) {
     DisposableEffect(lifecycleOwner, viewModel) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_STOP) viewModel.persistEdits()
-            if (event == Lifecycle.Event.ON_START) viewModel.onForeground()
+            if (event == Lifecycle.Event.ON_START) {
+                viewModel.onForeground()
+                mediaManagementGranted = canManageMedia()
+            }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
@@ -192,12 +228,25 @@ fun AppRoot(viewModel: MainViewModel = viewModel()) {
                 onBeginSelection = viewModel::enterSelection, onToggleSelection = viewModel::toggleSelection,
                 onSelectAll = viewModel::selectAllPhotos, onCancelSelection = viewModel::cancelSelection,
                 onDeleteSelected = { pendingDelete = photos.filter { it.uri in selectedUris } },
+                mediaManagementGranted = mediaManagementGranted,
+                onManageMedia = if (Build.VERSION.SDK_INT >= 31) ({ showMediaManagement = true }) else null,
             )
         }
         pendingDelete?.takeIf { it.isNotEmpty() }?.let { requested ->
             DeleteConfirmationDialog(requested.size, requested.singleOrNull()?.displayName,
                 onConfirm = { pendingDelete = null; confirmDeletion(requested) }, onDismiss = { pendingDelete = null })
         }
+        if (showMediaManagement) MediaManagementDialog(
+            onAuthorize = { openMediaManagement() },
+            onSkip = {
+                deletionPreferences.edit().putBoolean("management-explained", true).apply()
+                showMediaManagement = false
+                val requested = deleteAfterManagement
+                deleteAfterManagement = null
+                if (requested != null) viewModel.deletePhotos(requested)
+            },
+            onDismiss = { showMediaManagement = false; deleteAfterManagement = null },
+        )
     }
 }
 

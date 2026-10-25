@@ -75,6 +75,7 @@ fun GridScreen(
     selecting: Boolean, selectedUris: Set<String>, deleting: Boolean,
     onBeginSelection: (String?) -> Unit, onToggleSelection: (String) -> Unit,
     onSelectAll: () -> Unit, onCancelSelection: () -> Unit, onDeleteSelected: () -> Unit,
+    mediaManagementGranted: Boolean, onManageMedia: (() -> Unit)?,
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val openPrivacy = LocalOpenPrivacyPolicy.current
@@ -96,7 +97,7 @@ fun GridScreen(
                 RefreshButton(scanning, onRefresh)
                 StudioIconButton(StudioSymbol.FolderOpen, "选择目录", onChangeDir)
                 StudioIconButton(StudioSymbol.SquareCheck, "选择照片", { onBeginSelection(null) }, enabled = photoCount > 0)
-                GallerySettings(showCr3Only, onShowCr3Only, openPrivacy)
+                GallerySettings(showCr3Only, onShowCr3Only, openPrivacy, mediaManagementGranted, onManageMedia)
             }
         }
         if (items.isEmpty()) Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
@@ -141,7 +142,8 @@ fun GridScreen(
 }
 
 @Composable
-private fun GallerySettings(cr3Only: Boolean, onCr3Only: (Boolean) -> Unit, onPrivacy: () -> Unit) {
+private fun GallerySettings(cr3Only: Boolean, onCr3Only: (Boolean) -> Unit, onPrivacy: () -> Unit,
+    mediaManagementGranted: Boolean, onManageMedia: (() -> Unit)?) {
     var opened by remember { mutableStateOf(false) }
     val top = with(LocalDensity.current) { 48.dp.roundToPx() }
     Box {
@@ -161,6 +163,13 @@ private fun GallerySettings(cr3Only: Boolean, onCr3Only: (Boolean) -> Unit, onPr
                     }
                 }
                 Box(Modifier.fillMaxWidth().height(1.dp).background(StudioColors.Line))
+                if (onManageMedia != null) Column(Modifier.fillMaxWidth().clickable {
+                    opened = false; onManageMedia()
+                }.padding(horizontal = 16.dp, vertical = 14.dp)) {
+                    Text("系统删除授权", color = StudioColors.Ink, style = MaterialTheme.typography.bodyMedium)
+                    Text(if (mediaManagementGranted) "已授权 · 无需逐次系统确认" else "一次授权，免去逐次系统确认",
+                        Modifier.padding(top = 4.dp), color = StudioColors.Muted, fontSize = 11.sp)
+                }
                 Row(Modifier.fillMaxWidth().clickable { opened = false; onPrivacy() }.padding(horizontal = 16.dp, vertical = 14.dp),
                     verticalAlignment = Alignment.CenterVertically) {
                     StudioIcon(StudioSymbol.Info, Modifier.size(18.dp), tint = StudioColors.Muted)

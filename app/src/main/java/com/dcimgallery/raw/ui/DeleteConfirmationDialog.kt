@@ -41,3 +41,24 @@ internal fun DeleteConfirmationDialog(count: Int, name: String?, onConfirm: () -
         }
     }
 }
+
+@Composable
+internal fun MediaManagementDialog(onAuthorize: () -> Unit, onSkip: () -> Unit, onDismiss: () -> Unit) {
+    Dialog(onDismissRequest = onDismiss) {
+        Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(Color.White).padding(24.dp)) {
+            Text("免去重复系统授权", color = StudioColors.Ink, fontSize = 20.sp, fontWeight = FontWeight.Medium)
+            Text("在接下来的系统设置中，允许若图管理媒体。授权后，删除系统相册照片无需每次再确认系统弹窗，若图内的删除二次确认仍会保留。\n\n此权限仅用于您主动确认的删除操作，可随时在系统设置中撤销。也可暂不授权，继续逐次确认。",
+                Modifier.padding(top = 14.dp, bottom = 22.dp), color = StudioColors.Muted, fontSize = 14.sp)
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Box(Modifier.weight(1f).height(44.dp).clip(RoundedCornerShape(12.dp))
+                    .background(StudioColors.Canvas).clickable(onClick = onSkip), contentAlignment = Alignment.Center) {
+                    Text("暂不授权", color = StudioColors.Ink, fontSize = 14.sp)
+                }
+                Box(Modifier.weight(1f).height(44.dp).clip(RoundedCornerShape(12.dp))
+                    .background(StudioColors.Pine).clickable(onClick = onAuthorize), contentAlignment = Alignment.Center) {
+                    Text("前往授权", color = Color.White, fontSize = 14.sp)
+                }
+            }
+        }
+    }
+}

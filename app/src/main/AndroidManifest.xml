@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <!-- 通过 SAF 访问外接盘；本机相册走 MediaStore，需要读媒体权限 -->
     <uses-permission
@@ -9,6 +10,9 @@
         android:name="android.permission.READ_EXTERNAL_STORAGE"
         android:maxSdkVersion="32" />
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+    <!-- MANAGE_MEDIA supports user-granted appop via ACTION_REQUEST_MANAGE_MEDIA on API 31+.
+         The generic protected-permission lint rule does not account for this settings grant. -->
+    <uses-permission android:name="android.permission.MANAGE_MEDIA" tools:ignore="ProtectedPermissions" />
 
     <application
         android:name=".GalleryApp"
