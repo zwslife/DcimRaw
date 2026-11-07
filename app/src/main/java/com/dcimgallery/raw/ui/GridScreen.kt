@@ -74,6 +74,7 @@ fun GridScreen(
     showCr3Only: Boolean, onShowCr3Only: (Boolean) -> Unit,
     selecting: Boolean, selectedUris: Set<String>, deleting: Boolean,
     onBeginSelection: (String?) -> Unit, onToggleSelection: (String) -> Unit,
+    onDragSelection: (Set<String>) -> Unit,
     onSelectAll: () -> Unit, onCancelSelection: () -> Unit, onDeleteSelected: () -> Unit,
     mediaManagementGranted: Boolean, onManageMedia: (() -> Unit)?,
 ) {
@@ -106,7 +107,10 @@ fun GridScreen(
                 Text(if (scanning) "正在查找照片…" else if (showCr3Only) "当前没有可显示的 CR3 照片" else "选择目录，开始浏览照片", Modifier.padding(top = 16.dp), color = StudioColors.Muted)
             }
         } else LazyVerticalGrid(columns = GridCells.Fixed(4), state = gridState,
-            modifier = Modifier.fillMaxWidth().weight(1f), contentPadding = PaddingValues(start = 2.dp, end = 2.dp, bottom = 16.dp),
+            userScrollEnabled = !selecting,
+            modifier = Modifier.fillMaxWidth().weight(1f)
+                .galleryDragSelection(gridState, items, selecting, deleting, selectedUris, onDragSelection),
+            contentPadding = PaddingValues(start = 2.dp, end = 2.dp, bottom = 16.dp),
             horizontalArrangement = Arrangement.spacedBy(2.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             items(count = items.size, key = { index -> when (val item = items[index]) {
                 is GridItem.Header -> "header_${item.date}"
@@ -120,8 +124,7 @@ fun GridScreen(
                     }
                     is GridItem.PhotoItem -> {
                         GridCell(item.photo, item.photo.uri in usb, selecting, item.photo.uri in selectedUris, !deleting,
-                            onClick = { if (selecting) onToggleSelection(item.photo.uri) else onOpen(item.photo.uri) },
-                            onLongClick = { onBeginSelection(item.photo.uri) })
+                            onClick = { if (selecting) onToggleSelection(item.photo.uri) else onOpen(item.photo.uri) })
                     }
                 }
             }
@@ -200,7 +203,7 @@ private fun RefreshButton(scanning: Boolean, onRefresh: () -> Unit) {
 @Composable
 @OptIn(ExperimentalFoundationApi::class)
 private fun GridCell(photo: PhotoEntity, usb: Boolean, selecting: Boolean, chosen: Boolean, enabled: Boolean,
-    onClick: () -> Unit, onLongClick: () -> Unit) {
+    onClick: () -> Unit) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val request = remember(context, photo.uri, photo.sizeBytes, photo.lastModified, photo.source) {
         ImageRequest.Builder(context).data(if (photo.source == "external")
@@ -211,7 +214,7 @@ private fun GridCell(photo: PhotoEntity, usb: Boolean, selecting: Boolean, chose
         value = PhotoFormatProbe.read(context, photo.uri, photo.sizeBytes, photo.lastModified)
     }
     Box(Modifier.aspectRatio(1f).clip(RoundedCornerShape(2.dp))
-        .background(StudioColors.Canvas).combinedClickable(enabled = enabled, onClick = onClick, onLongClick = onLongClick)
+        .background(StudioColors.Canvas).clickable(enabled = enabled, onClick = onClick)
         .semantics { selected = selecting && chosen }) {
         AsyncImage(model = request, contentDescription = photo.displayName,
             contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())

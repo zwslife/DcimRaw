@@ -7,18 +7,20 @@ data class CurvePoint(val x: Float, val y: Float)
 
 /** Normalized point curve. Harmonic tangents avoid overshoot between control points. */
 data class ToneCurve(val points: List<CurvePoint> = listOf(CurvePoint(0f, 0f), CurvePoint(1f, 1f))) {
-    val isNeutral: Boolean get() = points.all { it.x == it.y }
+    val isNeutral: Boolean get() = normalized().points.let {
+        it.first() == CurvePoint(0f, 0f) && it.last() == CurvePoint(1f, 1f) && it.all { point -> point.x == point.y }
+    }
 
     fun normalized(): ToneCurve {
         val valid = points.filter { it.x.isFinite() && it.y.isFinite() }
             .map { CurvePoint(it.x.coerceIn(0f, 1f), it.y.coerceIn(0f, 1f)) }
             .sortedBy { it.x }.distinctBy { it.x }.take(16)
         if (valid.size < 2) return ToneCurve()
-        val middle = valid.filter { it.x >= .004f && it.x <= .996f }
+        val spaced = valid
             .fold(emptyList<CurvePoint>()) { kept, point ->
                 if (kept.isEmpty() || point.x - kept.last().x >= .004f) kept + point else kept
-            }.take(14)
-        return ToneCurve(listOf(CurvePoint(0f, valid.first().y)) + middle + CurvePoint(1f, valid.last().y))
+            }
+        return if (spaced.size < 2) ToneCurve() else ToneCurve(spaced)
     }
 
     fun lut(): FloatArray {

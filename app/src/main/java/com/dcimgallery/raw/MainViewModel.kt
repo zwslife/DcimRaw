@@ -336,6 +336,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun toggleSelection(uri: String) {
         if (!_deleting.value) _selectedUris.update { if (uri in it) it - uri else it + uri }
     }
+    fun setSelectedPhotos(uris: Set<String>) {
+        if (!_deleting.value) {
+            _selecting.value = true
+            _selectedUris.value = uris.intersect(photos.value.mapTo(HashSet()) { it.uri })
+        }
+    }
     fun selectAllPhotos() { if (!_deleting.value) _selectedUris.value = photos.value.mapTo(LinkedHashSet()) { it.uri } }
     fun cancelSelection() {
         if (_deleting.value) return

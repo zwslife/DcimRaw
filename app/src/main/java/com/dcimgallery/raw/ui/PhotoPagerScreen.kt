@@ -192,6 +192,7 @@ fun PhotoPagerScreen(
     var maskOverlay by rememberSaveable { mutableStateOf(true) }
     var maskPanelHeight by remember { mutableIntStateOf(0) }
     var toneDragging by remember { mutableStateOf(false) }
+    var curveSection by remember { mutableStateOf(false) }
     val maskPanelDp = with(LocalDensity.current) { maskPanelHeight.toDp() }
     val selectedMask = currentMasks.firstOrNull { it.id == selectedMaskId }
     fun finishMasks() { showMasks = false; gestureState.reset(); current?.let(onTonePanelDone) }
@@ -586,7 +587,7 @@ fun PhotoPagerScreen(
         // 调色面板
         if (showTone && current != null) {
             val tone = toneParams[current.uri] ?: ToneParams()
-            Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(editorPanelHeight)
+            Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(if (curveSection) maxHeight * .65f else editorPanelHeight)
                 .onSizeChanged { tonePanelHeight = it.height }) {
                 TonePanel(
                     photoName = current.displayName,
@@ -594,6 +595,7 @@ fun PhotoPagerScreen(
                     onParamsChange = { onToneChange(current.uri, it) },
                     onReset = { onResetEdits(current.uri) },
                     onDraggingChange = { toneDragging = it },
+                    onCurveSection = { curveSection = it },
                     onClose = {
                         showTone = false
                         current?.let(onTonePanelDone)

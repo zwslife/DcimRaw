@@ -20,6 +20,13 @@ fun main() {
     check(inverse.asList().zipWithNext().all { (a, b) -> a >= b })
     val close = ToneCurve(listOf(CurvePoint(0f, 0f), CurvePoint(1e-30f, 1f), CurvePoint(1f, 1f)))
     check(close.lut().all { it.isFinite() && it in 0f..255f })
+    val clipped = ToneCurve(listOf(CurvePoint(.2f, 0f), CurvePoint(.8f, 1f)))
+    check(clipped.normalized() == clipped) { "Endpoint x coordinates must survive saving" }
+    check(clipped.normalized().normalized() == clipped)
+    check(clipped.lut()[20] == 0f && clipped.lut()[235] == 255f)
+    check(clipped.lut()[64] < 40f && clipped.lut()[192] > 230f)
+    val trimmedIdentity = ToneCurve(listOf(CurvePoint(.2f, .2f), CurvePoint(.8f, .8f)))
+    check(!trimmedIdentity.isNeutral) { "Clipped diagonal endpoints are not a neutral curve" }
     check(neutral.effectsArray().size == ToneParams.EFFECT_COUNT)
     check(neutral.withEffects(neutral.effectsArray()) == neutral)
     val rich = neutral.copy(vibrance = .31f, texture = -.42f, clarity = .53f, dehaze = .64f,

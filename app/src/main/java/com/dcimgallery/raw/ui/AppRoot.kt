@@ -226,6 +226,7 @@ fun AppRoot(viewModel: MainViewModel = viewModel()) {
                 onShowCr3Only = viewModel::setShowCr3Only,
                 selecting = selecting, selectedUris = selectedUris, deleting = deleting,
                 onBeginSelection = viewModel::enterSelection, onToggleSelection = viewModel::toggleSelection,
+                onDragSelection = viewModel::setSelectedPhotos,
                 onSelectAll = viewModel::selectAllPhotos, onCancelSelection = viewModel::cancelSelection,
                 onDeleteSelected = { pendingDelete = photos.filter { it.uri in selectedUris } },
                 mediaManagementGranted = mediaManagementGranted,

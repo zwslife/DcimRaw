@@ -65,8 +65,8 @@ android {
         applicationId = "com.dcimgallery.raw"
         minSdk = 26
         targetSdk = 34
-        versionCode = 43
-        versionName = "0.9.19"
+        versionCode = 44
+        versionName = "0.9.20"
         buildConfigField("boolean", "PRIVACY_POLICY_READY", policyReady.toString())
         buildConfigField("String", "PRIVACY_POLICY_VERSION", "\"$policyVersion\"")
 

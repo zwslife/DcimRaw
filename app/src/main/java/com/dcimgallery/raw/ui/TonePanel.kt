@@ -13,7 +13,7 @@ import com.dcimgallery.raw.core.tone.ToneParams
 @Composable
 fun TonePanel(photoName: String, params: ToneParams, onParamsChange: (ToneParams) -> Unit,
     onReset: () -> Unit, onClose: () -> Unit, compactHeader: Boolean = false,
-    onDraggingChange: (Boolean) -> Unit = {}) {
+    onDraggingChange: (Boolean) -> Unit = {}, onCurveSection: (Boolean) -> Unit = {}) {
     var section by rememberSaveable(photoName) { mutableIntStateOf(0) }
     val history = remember(photoName) { mutableStateListOf<ToneParams>() }
     val redo = remember(photoName) { mutableStateListOf<ToneParams>() }
@@ -21,6 +21,7 @@ fun TonePanel(photoName: String, params: ToneParams, onParamsChange: (ToneParams
     val current by rememberUpdatedState(params)
     val scroll = rememberScrollState()
     LaunchedEffect(section) { scroll.scrollTo(0) }
+    LaunchedEffect(section) { onCurveSection(section == 6) }
     PorcelainPanel {
         PorcelainHeader(onUndo = {
             if (history.isNotEmpty()) { redo.add(current); onParamsChange(history.removeAt(history.lastIndex)) }
@@ -28,7 +29,8 @@ fun TonePanel(photoName: String, params: ToneParams, onParamsChange: (ToneParams
             if (redo.isNotEmpty()) { history.add(current); onParamsChange(redo.removeAt(redo.lastIndex)) }
         }, canRedo = redo.isNotEmpty())
         EditorTabs(section, { section = it })
-        Column(Modifier.weight(1f).verticalScroll(scroll).padding(horizontal = 18.dp, vertical = 6.dp)) {
+        Column(Modifier.weight(1f).then(if (section == 6) Modifier else Modifier.verticalScroll(scroll))
+            .padding(horizontal = 18.dp, vertical = 6.dp)) {
             ToneRows(section, params, { next ->
                 before?.takeIf { it != next }?.let { history.add(it); redo.clear(); before = null }
                 onParamsChange(next)

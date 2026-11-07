@@ -64,13 +64,14 @@ internal fun CurveEditor(params: ToneParams, onChange: (ToneParams) -> Unit,
         if (found >= 0) { selectedPoint = found; return }
         val x = ((at.x - inset) / width).coerceIn(.008f, .992f)
         val p = points()
+        if (x <= p.first().x + .008f || x >= p.last().x - .008f) { selectedPoint = -1; return }
         if (p.size >= 16 || p.any { kotlin.math.abs(it.x - x) < .008f }) { selectedPoint = -1; return }
         val next = (p + CurvePoint(x, (1f - (at.y - inset) / height).coerceIn(0f, 1f))).sortedBy { it.x }
         selectedPoint = next.indexOfFirst { it.x == x }
         update(next)
     }
     DisposableEffect(scopeKey, channel) { onDispose { gesture(false) } }
-    Column {
+    Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().height(36.dp), verticalAlignment = Alignment.CenterVertically) {
             names.forEachIndexed { index, name ->
                 Box(Modifier.padding(end = 6.dp).clip(CircleShape)
@@ -86,7 +87,12 @@ internal fun CurveEditor(params: ToneParams, onChange: (ToneParams) -> Unit,
                     gesture(true); update(ToneCurve().points); selectedPoint = -1; gesture(false)
                 }.padding(10.dp))
         }
-        Canvas(Modifier.fillMaxWidth().height(176.dp).clip(RoundedCornerShape(12.dp))
+        Row(Modifier.fillMaxWidth().padding(vertical = 5.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text(listOf("↑ 提亮", "↑ 增加红色", "↑ 增加绿色", "↑ 增加蓝色")[channel], color = tint, fontSize = 11.sp)
+            Text(listOf("↓ 压暗", "↓ 偏青色", "↓ 偏品红", "↓ 偏黄色")[channel],
+                color = listOf(Color(0xFF65736A), Color(0xFF15969D), Color(0xFFB75A9A), Color(0xFF9C811D))[channel], fontSize = 11.sp)
+        }
+        Canvas(Modifier.fillMaxWidth().weight(1f).clip(RoundedCornerShape(12.dp))
             .background(Color(0xFFF6F8F5))
             .semantics { contentDescription = "${names[channel]}曲线，点按添加控制点，拖动调整，双击删除中间点" }
             .pointerInput(scopeKey, channel) {
@@ -98,12 +104,9 @@ internal fun CurveEditor(params: ToneParams, onChange: (ToneParams) -> Unit,
                     event.consume()
                     val p = points(); val index = selectedPoint
                     if (index in p.indices) {
-                        val x = when (index) {
-                            0 -> 0f
-                            p.lastIndex -> 1f
-                            else -> ((event.position.x - inset) / (size.width - inset*2))
-                                .coerceIn(p[index - 1].x + .004f, p[index + 1].x - .004f)
-                        }
+                        val lower = if (index == 0) 0f else p[index - 1].x + .004f
+                        val upper = if (index == p.lastIndex) 1f else p[index + 1].x - .004f
+                        val x = ((event.position.x - inset) / (size.width - inset*2)).coerceIn(lower, upper)
                         val y = (1f - (event.position.y - inset) / (size.height - inset*2)).coerceIn(0f, 1f)
                         update(p.toMutableList().also { it[index] = CurvePoint(x, y) })
                     }
