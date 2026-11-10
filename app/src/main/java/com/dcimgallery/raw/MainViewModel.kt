@@ -31,6 +31,7 @@ import com.dcimgallery.raw.core.tone.PhotoEditClipboard
 import com.dcimgallery.raw.data.db.PhotoEntity
 import com.dcimgallery.raw.data.repo.PhotoRepository
 import com.dcimgallery.raw.core.media.PhotoDeletion
+import com.dcimgallery.raw.core.geometry.PhotoGeometry
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.Dispatchers
@@ -175,11 +176,66 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     private val _masks = MutableStateFlow<Map<String, List<MaskLayer>>>(emptyMap())
     val masks: StateFlow<Map<String, List<MaskLayer>>> = _masks
+    private val _geometry = MutableStateFlow<Map<String, PhotoGeometry>>(emptyMap())
+    val geometry: StateFlow<Map<String, PhotoGeometry>> = _geometry
     private val editStore = PhotoEditStore(app)
     private val loadedEdits = mutableSetOf<String>()
     private val loadingEdits = mutableMapOf<String, Job>()
     private val pendingSaves = mutableMapOf<String, Job>()
     private val editSaveMutex = Mutex()
+    private var editBaseline: Pair<String, PhotoEdits>? = null
+    private val _editingUri = MutableStateFlow<String?>(null)
+    val editingUri: StateFlow<String?> = _editingUri
+    private val _editBusy = MutableStateFlow(false)
+    val editBusy: StateFlow<Boolean> = _editBusy
+
+    /** Drafts are rendered in memory; only the editor's Done action writes them to disk. */
+    fun beginEditing(uri: String): Job? {
+        if (_editBusy.value || editBaseline != null) return null
+        _editBusy.value = true
+        return viewModelScope.launch {
+            try {
+                loadEdits(uri)?.join()
+                pendingSaves[uri]?.join()
+                editSaveMutex.withLock {
+                    editBaseline = uri to editSnapshot(uri)
+                    photos.value.indexOfFirst { it.uri == uri }.takeIf { it >= 0 }?.let { selectedIndex.value = it }
+                    _editingUri.value = uri
+                }
+            } finally { _editBusy.value = false }
+        }
+    }
+
+    fun finishEditing(save: Boolean): Job? {
+        val (uri, baseline) = editBaseline ?: return null
+        if (_editBusy.value) return null
+        _editBusy.value = true
+        return viewModelScope.launch {
+            try {
+                if (save) {
+                    val snapshot = editSnapshot(uri)
+                    withContext(Dispatchers.IO + NonCancellable) {
+                        editSaveMutex.withLock { editStore.save(uri, snapshot) }
+                    }
+                } else {
+                    _toneParams.update { it + (uri to baseline.tone) }
+                    _masks.update { it + (uri to baseline.masks) }
+                    _geometry.update { it + (uri to baseline.geometry) }
+                    if (toneFull.value?.first == uri) toneFull.value = null
+                    if (tonePreview.value?.first == uri) tonePreview.value = null
+                    renderTonePreview(uri)
+                }
+                photos.value.indexOfFirst { it.uri == uri }.takeIf { it >= 0 }?.let { selectedIndex.value = it }
+                editBaseline = null
+                _editingUri.value = null
+            } catch (error: Exception) {
+                toast.value = "编辑保存失败：${error.message}"
+            } finally { _editBusy.value = false }
+        }
+    }
+
+    private fun editSnapshot(uri: String) = PhotoEdits(_toneParams.value[uri] ?: ToneParams(),
+        _masks.value[uri].orEmpty(), _geometry.value[uri] ?: PhotoGeometry())
     private val editClipboard = PhotoEditClipboard()
     val canPasteEdits = MutableStateFlow(false)
 
@@ -213,20 +269,30 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun setMasks(uri: String, layers: List<MaskLayer>) {
+        if (_editBusy.value) return
         _masks.update { it + (uri to layers) }
         if (toneFull.value?.first == uri) toneFull.value = null
         renderTonePreview(uri)
         saveEdits(uri)
     }
 
+    fun setGeometry(uri: String, geometry: PhotoGeometry) {
+        if (_editBusy.value) return
+        _geometry.update { it + (uri to geometry.normalized()) }
+        saveEdits(uri)
+    }
+
     private fun saveEdits(uri: String, debounceMillis: Long = 250) {
+        if (editBaseline?.first == uri) return
         pendingSaves.remove(uri)?.cancel()
         pendingSaves[uri] = viewModelScope.launch {
             delay(debounceMillis)
             loadingEdits[uri]?.join()
+            if (editBaseline?.first == uri) return@launch
             withContext(Dispatchers.IO + NonCancellable) {
                 editSaveMutex.withLock {
-                    val snapshot = PhotoEdits(_toneParams.value[uri] ?: ToneParams(), _masks.value[uri].orEmpty())
+                    val snapshot = PhotoEdits(_toneParams.value[uri] ?: ToneParams(), _masks.value[uri].orEmpty(),
+                        _geometry.value[uri] ?: PhotoGeometry())
                     runCatching { editStore.save(uri, snapshot) }
                         .onFailure { toast.value = "编辑保存失败：${it.message}" }
                 }
@@ -241,13 +307,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             // 加载期间用户已开始操作时，保留当前编辑。
             _toneParams.update { if (uri in it) it else it + (uri to saved.tone) }
             _masks.update { if (uri in it) it else it + (uri to saved.masks) }
+            _geometry.update { if (uri in it) it else it + (uri to saved.geometry) }
             renderTonePreview(uri)
         }.also { loadingEdits[uri] = it }
     }
 
     /** 离开编辑页或应用进入后台时立即落盘，取消等待中的防抖。 */
     fun persistEdits() {
-        (_toneParams.value.keys + _masks.value.keys).forEach { saveEdits(it, 0) }
+        (_toneParams.value.keys + _masks.value.keys + _geometry.value.keys).forEach { saveEdits(it, 0) }
     }
 
     /** 导出进行中 */
@@ -447,6 +514,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     /** 更新某张照片的调色参数（全尺寸定稿随之失效，待重新渲染）。 */
     fun setTone(uri: String, params: ToneParams) {
+        if (_editBusy.value) return
         _toneParams.update { it + (uri to params) }
         if (toneFull.value?.first == uri) toneFull.value = null
         renderTonePreview(uri)
@@ -615,7 +683,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 saveEdits(photo.uri, 0)
                 pendingSaves[photo.uri]?.join()
                 val tone = _toneParams.value[photo.uri] ?: ToneParams()
-                val reason = rawRepository.exportJpeg(photo.uri, photo.displayName, tone, _masks.value[photo.uri].orEmpty())
+                val reason = rawRepository.exportJpeg(photo.uri, photo.displayName, tone, _masks.value[photo.uri].orEmpty(),
+                    _geometry.value[photo.uri] ?: PhotoGeometry())
                 toast.value = reason?.let { "导出失败：$it" } ?: "已导出到系统相册（Pictures/CR3相册）"
             } finally {
                 _exporting.value = false
@@ -656,6 +725,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     _decodingSet.update { it - deleted }
                     _toneParams.update { it - deleted }
                     _masks.update { it - deleted }
+                    _geometry.update { it - deleted }
                     if (tonePreview.value?.first in deleted) tonePreview.value = null
                     if (toneFull.value?.first in deleted) toneFull.value = null
                 }

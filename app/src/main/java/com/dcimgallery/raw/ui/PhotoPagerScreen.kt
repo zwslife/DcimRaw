@@ -10,7 +10,6 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -42,7 +41,6 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Button
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -66,7 +64,6 @@ import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.zIndex
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.TransformOrigin
-import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.pointer.PointerId
@@ -97,12 +94,16 @@ import com.dcimgallery.raw.core.tone.MaskTool
 import com.dcimgallery.raw.core.raw.PhotoFileType
 import com.dcimgallery.raw.core.raw.PhotoFormatProbe
 import com.dcimgallery.raw.data.db.PhotoEntity
+import com.dcimgallery.raw.core.geometry.PhotoGeometry
+import com.dcimgallery.raw.core.geometry.PhotoGeometryRenderer
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 import kotlin.math.abs
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 /**
  * 全屏照片查看（仿微信沉浸式交互）。
@@ -118,11 +119,13 @@ fun PhotoPagerScreen(
     decodedMap: Map<String, Bitmap>,
     exporting: Boolean,
     deleting: Boolean,
+    editBusy: Boolean,
+    onBeginEditing: (String) -> Unit,
     toneParams: Map<String, ToneParams>,
     tonePreview: Pair<String, Bitmap>?,
     toneFull: Pair<String, Bitmap>?,
     masks: Map<String, List<MaskLayer>>,
-    onMasksChange: (String, List<MaskLayer>) -> Unit,
+    geometry: Map<String, PhotoGeometry>,
     canPasteEdits: Boolean,
     onCopyEdits: (String) -> Unit,
     onPasteEdits: (String) -> Unit,
@@ -132,7 +135,6 @@ fun PhotoPagerScreen(
     onExport: (PhotoEntity) -> Unit,
     onExportEmbedded: (PhotoEntity) -> Unit,
     onDelete: (PhotoEntity) -> Unit,
-    onToneChange: (String, ToneParams) -> Unit,
     onEnsureToneEngine: (PhotoEntity) -> Unit,
     onTonePanelDone: (PhotoEntity) -> Unit,
     onPageChanged: (String?) -> Unit,
@@ -151,12 +153,9 @@ fun PhotoPagerScreen(
     var showMore by remember { mutableStateOf(false) }
     var showExport by rememberSaveable { mutableStateOf(false) }
     var exportEmbedded by rememberSaveable { mutableStateOf(false) }
-    var tonePanelHeight by remember { mutableIntStateOf(0) }
     var dockHeight by remember { mutableIntStateOf(0) }
     var infoHeight by remember { mutableIntStateOf(0) }
     var showInfo by rememberSaveable { mutableStateOf(false) }
-    var showTone by rememberSaveable { mutableStateOf(false) }
-    var showMasks by rememberSaveable { mutableStateOf(false) }
     var uiVisible by rememberSaveable { mutableStateOf(true) }
     val context = LocalContext.current
     val viewerPreferences = remember(context) { context.getSharedPreferences("photo-viewer", Context.MODE_PRIVATE) }
@@ -169,6 +168,7 @@ fun PhotoPagerScreen(
     val fallbackBitmaps = remember { mutableStateMapOf<String, Bitmap>() }
 
     val current = photos.getOrNull(pagerState.currentPage)
+    val currentGeometry = geometry[current?.uri] ?: PhotoGeometry()
     val currentFileType by androidx.compose.runtime.key(current?.uri, current?.sizeBytes, current?.lastModified) {
         produceState(PhotoFileType.UNKNOWN) {
             value = current?.let { PhotoFormatProbe.read(context, it.uri, it.sizeBytes, it.lastModified) } ?: PhotoFileType.UNKNOWN
@@ -181,28 +181,7 @@ fun PhotoPagerScreen(
     val canEdit = current != null
     val usbPhotos by produceState(emptySet<String>(), photos) { value = StorageOrigin.usbPhotos(context, photos) }
     val currentMasks = current?.let { masks[it.uri] }.orEmpty()
-    var selectedMaskId by rememberSaveable(current?.uri) { mutableStateOf<String?>(null) }
-    var maskTool by rememberSaveable { mutableStateOf(MaskTool.BRUSH) }
-    var maskSubtract by rememberSaveable { mutableStateOf(false) }
-    var maskRadius by rememberSaveable { mutableFloatStateOf(0.06f) }
-    var maskFeather by rememberSaveable { mutableFloatStateOf(0.7f) }
-    var maskOpacity by rememberSaveable { mutableFloatStateOf(1f) }
-    var maskComponent by rememberSaveable(current?.uri) { mutableIntStateOf(-1) }
-    var maskAdjusting by rememberSaveable { mutableStateOf(false) }
-    var maskOverlay by rememberSaveable { mutableStateOf(true) }
-    var maskPanelHeight by remember { mutableIntStateOf(0) }
-    var toneDragging by remember { mutableStateOf(false) }
-    var curveSection by remember { mutableStateOf(false) }
-    val maskPanelDp = with(LocalDensity.current) { maskPanelHeight.toDp() }
-    val selectedMask = currentMasks.firstOrNull { it.id == selectedMaskId }
-    fun finishMasks() { showMasks = false; gestureState.reset(); current?.let(onTonePanelDone) }
-    BackHandler {
-        when { showMasks -> finishMasks(); showExport -> showExport = false; showInfo -> showInfo = false
-            showTone -> { showTone = false; current?.let(onTonePanelDone) }; else -> onClose() }
-    }
-    LaunchedEffect(current?.uri, currentMasks.map { it.id }) {
-        if (currentMasks.none { it.id == selectedMaskId }) selectedMaskId = currentMasks.lastOrNull()?.id
-    }
+    BackHandler { if (showExport) showExport = false else if (showInfo) showInfo = false else onClose() }
 
     LaunchedEffect(Unit) { gestureState.attach(scope) }
     LaunchedEffect(pagerState.currentPage, photos.size) {
@@ -217,31 +196,32 @@ fun PhotoPagerScreen(
     val hasCurrentEdits = current?.let { !(toneParams[it.uri] ?: ToneParams()).isNeutral } == true ||
         currentMasks.any { it.enabled && !it.tone.isNeutral }
     // Use the same edited frame as the photo, excluding the colored mask overlay.
-    val histogramBitmap = current?.let { photo ->
+    val histogramSource = current?.let { photo ->
         val decoded = decodedMap[photo.uri]
         (if (hasCurrentEdits && !comparingOriginal) toneFull?.takeIf { it.first == photo.uri }?.second
             ?: tonePreview?.takeIf { it.first == photo.uri }?.second ?: decoded else decoded)
             ?: fallbackBitmaps[photo.uri]
     }
-    LaunchedEffect(showTone, showMasks, current?.uri, curDecodedReady, hasCurrentEdits) {
-        val photo = current ?: return@LaunchedEffect
-        val hasTone = !(toneParams[photo.uri] ?: ToneParams()).isNeutral
-        if (showTone || showMasks || hasTone || currentMasks.any { it.enabled && !it.tone.isNeutral }) onEnsureToneEngine(photo)
-    }
-    // 缩放查看时，拖动调色期间继续用低分辨率实时帧；手势与拨盘停下后再补全尺寸画面。
-    val zoomedForDetail = gestureState.isZoomed
-    val touchingForDetail = gestureState.isTouching
-    val flingingForDetail = gestureState.isFlinging
-    val currentToneForDetail = current?.let { toneParams[it.uri] }
-    val currentPreviewForDetail = tonePreview?.takeIf { it.first == current?.uri }?.second
-    LaunchedEffect(current?.uri, showTone, showMasks, zoomedForDetail, touchingForDetail,
-        flingingForDetail, toneDragging, currentToneForDetail, currentMasks, curDecodedReady,
-        currentPreviewForDetail) {
-        if (current != null && curDecodedReady && (showTone || showMasks) && zoomedForDetail &&
-            !touchingForDetail && !flingingForDetail && !toneDragging) {
-            delay(240)
-            onTonePanelDone(current)
+    val histogramBitmap by produceState<Bitmap?>(null, histogramSource, currentGeometry) {
+        value = withContext(Dispatchers.Default) {
+            histogramSource?.let { source ->
+                if (currentGeometry.isIdentity) source else {
+                    val scale = minOf(1f, 512f / maxOf(source.width, source.height))
+                    val small = Bitmap.createScaledBitmap(source, maxOf(1, (source.width * scale).toInt()),
+                        maxOf(1, (source.height * scale).toInt()), true)
+                    PhotoGeometryRenderer.render(small, currentGeometry).also {
+                        if (small !== source && small !== it) small.recycle()
+                    }
+                }
+            }
         }
+    }
+    LaunchedEffect(current?.uri, curDecodedReady, hasCurrentEdits) {
+        if (hasCurrentEdits) current?.let(onEnsureToneEngine)
+    }
+    val currentPreview = tonePreview?.takeIf { it.first == current?.uri }?.second
+    LaunchedEffect(current?.uri, currentPreview) {
+        if (currentPreview != null) current?.let(onTonePanelDone)
     }
 
     val viewH = gestureState.viewSize.height.toFloat().coerceAtLeast(1f)
@@ -266,8 +246,8 @@ fun PhotoPagerScreen(
                     scaleX = shrink
                     scaleY = shrink
                 }
-                .pointerInput(gestureState.isZoomed, showMasks) {
-                    if (!gestureState.isZoomed && !showMasks) {
+                .pointerInput(gestureState.isZoomed) {
+                    if (!gestureState.isZoomed) {
                         detectVerticalDragGestures(
                             onDragEnd = { if (gestureState.onGestureEnd()) onClose() },
                             onDragCancel = { gestureState.onGestureEnd() },
@@ -279,7 +259,6 @@ fun PhotoPagerScreen(
                 state = pagerState,
                 modifier = Modifier.fillMaxSize().clipToBounds(),
                 beyondViewportPageCount = 1,
-                userScrollEnabled = !showMasks,
             ) { page ->
                 val photo = photos[page]
                 val isCurrent = page == pagerState.currentPage
@@ -299,103 +278,17 @@ fun PhotoPagerScreen(
                         .padding(with(LocalDensity.current) {
                             // Chrome overlays fade without changing the image viewport.
                             PaddingValues(top = toolbarHeight.toDp(),
-                                bottom = when { showMasks -> maskPanelDp; showTone -> tonePanelHeight.toDp()
-                                    showInfo -> infoHeight.toDp(); else -> dockHeight.toDp() })
+                                bottom = if (showInfo) infoHeight.toDp() else dockHeight.toDp())
                         })
                         .onSizeChanged { if (isCurrent) gestureState.viewSize = it }
                         .clipToBounds()
                         // 图片与蒙版在同一个 graphicsLayer 内缩放；由父层在 Initial pass
                         // 统一识别双指手势，单指交给蒙版绘制或未缩放时的 Pager。
-                        .pointerInput(showMasks, gestureState.viewSize) {
-                            awaitEachGesture {
-                                awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
-                                gestureState.onTouchStart()
-                                try {
-                                    val first = awaitPointerEvent(PointerEventPass.Initial)
-                                    if (first.changes.none { it.pressed }) return@awaitEachGesture
-                                    if (!showMasks && first.changes.count { it.pressed } < 2 && !gestureState.isZoomed) {
-                                        return@awaitEachGesture
-                                    }
-                                    val prevPositions = HashMap<PointerId, Offset>()
-                                    first.changes.forEach { prevPositions[it.id] = it.position }
-                                    var trackedCount = first.changes.count { it.pressed }
-                                    var velocityTracker = VelocityTracker()
-                                    var movedWhileZoomed = false
-                                    velocityTracker.addPosition(first.changes.first().uptimeMillis,
-                                        first.changes.filter { it.pressed }.map { it.position }.centroid())
-                                    while (true) {
-                                        val event = awaitPointerEvent(PointerEventPass.Initial)
-                                        val pressed = event.changes.filter { it.pressed }
-                                        if (pressed.isEmpty()) {
-                                            if (movedWhileZoomed) {
-                                                val released = event.changes.filter { it.previousPressed }
-                                                if (trackedCount == 1 && released.size == 1) {
-                                                    velocityTracker.addPosition(released[0].uptimeMillis, released[0].position)
-                                                }
-                                                val velocity = velocityTracker.calculateVelocity()
-                                                gestureState.fling(Offset(velocity.x, velocity.y))
-                                            }
-                                            break
-                                        }
-                                        val positions = pressed.map { it.position }
-                                        val centroid = positions.centroid()
-                                        if (pressed.size != trackedCount) {
-                                            trackedCount = pressed.size
-                                            velocityTracker = VelocityTracker()
-                                            movedWhileZoomed = false
-                                            velocityTracker.addPosition(pressed[0].uptimeMillis, centroid)
-                                        }
-                                        var zoom = 1f
-                                        if (pressed.size >= 2) {
-                                            val prevD0 = prevPositions[pressed[0].id]
-                                            val prevD1 = prevPositions[pressed[1].id]
-                                            if (prevD0 != null && prevD1 != null) {
-                                                val prevDist = (prevD0 - prevD1).getDistance()
-                                                val curDist =
-                                                    (pressed[0].position - pressed[1].position).getDistance()
-                                                if (prevDist > 0f && curDist > 0f) {
-                                                    zoom = curDist / prevDist
-                                                }
-                                            }
-                                        }
-                                        val prevList = pressed.mapNotNull { prevPositions[it.id] }
-                                        val pan = if (prevList.size == pressed.size) {
-                                            centroid - prevList.centroid()
-                                        } else {
-                                            Offset.Zero
-                                        }
-                                        if ((pressed.size >= 2 || !showMasks && gestureState.isZoomed) &&
-                                            (zoom != 1f || pan != Offset.Zero)) {
-                                            gestureState.onTransform(centroid, pan, zoom)
-                                            if (gestureState.isZoomed && pan != Offset.Zero) {
-                                                velocityTracker.addPosition(pressed[0].uptimeMillis, centroid)
-                                                movedWhileZoomed = true
-                                            }
-                                            pressed.forEach { it.consume() }
-                                        }
-                                        prevPositions.clear()
-                                        pressed.forEach { prevPositions[it.id] = it.position }
-                                    }
-                                } finally {
-                                    gestureState.onTouchEnd()
-                                }
-                            }
-                        }
-                        .pointerInput(showMasks) {
-                            if (showMasks) return@pointerInput
-                            detectTapGestures(
-                                onTap = {
-                                    // 面板打开时优先关面板（调色面板关闭触发全尺寸定稿渲染）
-                                    if (showTone || showInfo) {
-                                        if (showTone) current?.let(onTonePanelDone)
-                                        showTone = false
-                                        showInfo = false
-                                    } else {
-                                        uiVisible = !uiVisible
-                                    }
-                                },
-                                onDoubleTap = { point -> gestureState.onDoubleTap(point) },
-                            )
+                        .editorImageGestures(gestureState, false)
+                        .pointerInput(showInfo) {
+                            detectTapGestures(onTap = {
+                                if (showInfo) showInfo = false else uiVisible = !uiVisible
+                            }, onDoubleTap = { gestureState.onDoubleTap(it) })
                         }
                         .graphicsLayer {
                             if (isCurrent) {
@@ -416,18 +309,14 @@ fun PhotoPagerScreen(
                     val displayBitmap = when {
                         isCurrent && comparingOriginal -> decoded
                         tone.isNeutral && !hasLocalTone -> decoded
-                        isCurrent && (showTone || showMasks) -> fullBmp ?: prevBmp ?: decoded
                         else -> fullBmp ?: prevBmp ?: decoded
                     }
                     // One photo layer: embedded JPEG and decoded RAW can have different
                     // orientation/aspect ratios. Keeping both exposes the JPEG in letterboxes.
-                    if (displayBitmap != null) {
-                        Image(
-                            bitmap = displayBitmap.asImageBitmap(),
-                            contentDescription = photo.displayName,
-                            contentScale = ContentScale.Fit,
-                            modifier = Modifier.fillMaxSize(),
-                        )
+                    val source = displayBitmap ?: fallbackBitmaps[photo.uri]
+                    if (source != null) {
+                        PhotoGeometryViewport(source, geometry[photo.uri] ?: PhotoGeometry(),
+                            photo.displayName, Modifier.fillMaxSize())
                     } else {
                         AsyncImage(
                             model = previewRequest,
@@ -439,36 +328,12 @@ fun PhotoPagerScreen(
                             modifier = Modifier.fillMaxSize(),
                         )
                     }
-                    if (showMasks && isCurrent && decoded != null) {
-                        MaskOverlay(
-                            layer = selectedMask, componentIndex = maskComponent, tool = maskTool,
-                            subtract = maskSubtract, radius = maskRadius, feather = maskFeather,
-                            opacity = maskOpacity, showOverlay = maskOverlay && !comparingOriginal,
-                            imageWidth = decoded.width, imageHeight = decoded.height,
-                            editable = !maskAdjusting && !comparingOriginal,
-                            onCommit = { index, part ->
-                                val layer = selectedMask
-                                if (layer != null) {
-                                    val parts = if (part.tool == MaskTool.BRUSH && index < 0) {
-                                        // Brush strokes share a range; retain their individual paths for rasterization.
-                                        val previous = layer.components.firstOrNull()
-                                        if (previous?.tool == MaskTool.BRUSH && previous.points.isNotEmpty()) {
-                                            listOf(previous.copy(points = previous.points + part.points,
-                                                strokeStarts = previous.strokeStarts + previous.points.size))
-                                        } else listOf(part)
-                                    } else listOf(part)
-                                    onMasksChange(photo.uri, currentMasks.map { if (it.id == layer.id) layer.copy(components = parts) else it })
-                                    maskComponent = 0
-                                }
-                            }, modifier = Modifier.fillMaxSize().zIndex(1f),
-                        )
-                    }
                 }
             }
 
             // 顶栏：圆形返回 + 标题 + 圆形信息（单击图片渐隐渐出）
             AnimatedVisibility(
-                visible = uiVisible || showMasks,
+                visible = uiVisible,
                 enter = fadeIn(),
                 exit = fadeOut(),
                 modifier = Modifier.align(Alignment.TopCenter),
@@ -482,7 +347,7 @@ fun PhotoPagerScreen(
                         .padding(horizontal = 12.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    StudioIconButton(StudioSymbol.ArrowLeft, "返回", { if (showMasks) finishMasks() else onClose() })
+                    StudioIconButton(StudioSymbol.ArrowLeft, "返回", onClose)
                     Spacer(Modifier.width(6.dp))
                     Column(Modifier.weight(1f)) {
                         Text(
@@ -507,7 +372,7 @@ fun PhotoPagerScreen(
                         Spacer(Modifier.width(4.dp))
                         StudioIconButton(StudioSymbol.Info, "信息", {
                             showInfo = !showInfo
-                            if (showInfo) { showTone = false; if (showMasks) finishMasks() }
+
                         }, modifier = Modifier.size(32.dp), selected = showInfo)
                     }
                     Box {
@@ -531,32 +396,33 @@ fun PhotoPagerScreen(
                 }
             }
 
-            // Four evenly spaced actions; deletion always goes through the shared confirmation.
+            // Geometry shares the photo's non-destructive editing and export flow.
             AnimatedVisibility(
-                visible = uiVisible && canEdit && !showInfo && !showTone && !showMasks,
+                visible = uiVisible && canEdit && !showInfo,
                 enter = fadeIn(),
                 exit = fadeOut(),
                 modifier = Modifier.align(Alignment.BottomCenter),
             ) {
-                Row(Modifier.fillMaxWidth().onSizeChanged { dockHeight = it.height }
+                Column(Modifier.fillMaxWidth().onSizeChanged { dockHeight = it.height }
                     .background(Color.White).navigationBarsPadding().padding(horizontal = 16.dp, vertical = 8.dp),
-                    horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
-                    StudioTool(StudioSymbol.Palette, "调色", { showTone = true; showInfo = false }, enabled = !deleting)
-                    StudioTool(StudioSymbol.Scan, "蒙版", {
-                        gestureState.reset(); showMasks = true; showTone = false; showInfo = false
-                        maskAdjusting = false; maskOverlay = true; maskComponent = -1
-                    }, enabled = curDecodedReady && !deleting)
-                    StudioTool(StudioSymbol.ArrowUpFromLine, if (exporting) "导出中…" else "导出",
-                        { showExport = true }, enabled = current != null && !exporting && !deleting)
-                    StudioTool(StudioSymbol.Trash2, if (deleting) "删除中…" else "删除",
-                        { current?.let(onDelete) }, enabled = current != null && !deleting && !exporting, tint = DeleteRed)
+                    horizontalAlignment = Alignment.CenterHorizontally) {
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly,
+                        verticalAlignment = Alignment.CenterVertically) {
+                        StudioTool(StudioSymbol.Pencil, "编辑", { current?.let { onBeginEditing(it.uri) } },
+                            enabled = curDecodedReady && !deleting && !exporting && !editBusy)
+                        StudioTool(StudioSymbol.Trash2, if (deleting) "删除中…" else "删除",
+                            { current?.let(onDelete) },
+                            enabled = current != null && !deleting && !exporting, tint = DeleteRed)
+                        StudioTool(StudioSymbol.ArrowUpFromLine, if (exporting) "导出中…" else "导出",
+                            { showExport = true }, enabled = current != null && !exporting && !deleting)
+                    }
                 }
             }
         }
 
-        if (curDecodedReady && !showInfo && (uiVisible || showTone || showMasks)) {
+        if (curDecodedReady && !showInfo && uiVisible) {
             val bottom = with(LocalDensity.current) {
-                when { showMasks -> maskPanelHeight.toDp(); showTone -> tonePanelHeight.toDp(); else -> dockHeight.toDp() }
+                dockHeight.toDp()
             }
             DisposableEffect(current?.uri) { onDispose { comparingOriginal = false } }
             Box(Modifier.align(Alignment.BottomEnd).padding(end = 12.dp, bottom = bottom + 12.dp)
@@ -574,53 +440,13 @@ fun PhotoPagerScreen(
         }
 
         // Fixed in screen coordinates, so zooming/panning the image does not move the chart.
-        if (showHistogram && (uiVisible || showMasks) && (toolbarHeight > 0 || showMasks)) {
+        if (showHistogram && uiVisible && toolbarHeight > 0) {
             val topInset = with(LocalDensity.current) { toolbarHeight.toDp() }
             HistogramOverlay(
                 photoKey = current?.uri, bitmap = histogramBitmap,
                 modifier = Modifier.align(Alignment.TopEnd)
                     .padding(top = topInset)
                     .padding(horizontal = 12.dp, vertical = 6.dp),
-            )
-        }
-
-        // 调色面板
-        if (showTone && current != null) {
-            val tone = toneParams[current.uri] ?: ToneParams()
-            Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(if (curveSection) maxHeight * .65f else editorPanelHeight)
-                .onSizeChanged { tonePanelHeight = it.height }) {
-                TonePanel(
-                    photoName = current.displayName,
-                    params = tone,
-                    onParamsChange = { onToneChange(current.uri, it) },
-                    onReset = { onResetEdits(current.uri) },
-                    onDraggingChange = { toneDragging = it },
-                    onCurveSection = { curveSection = it },
-                    onClose = {
-                        showTone = false
-                        current?.let(onTonePanelDone)
-                    },
-                )
-            }
-        }
-
-        if (showMasks && current != null) {
-            MaskPanel(
-                layers = currentMasks, selectedId = selectedMaskId,
-                onSelect = { selectedMaskId = it; maskComponent = -1 },
-                onChange = { onMasksChange(current.uri, it) },
-                tool = maskTool, onTool = { maskTool = it },
-                subtract = maskSubtract, onSubtract = { maskSubtract = it },
-                radius = maskRadius, onRadius = { maskRadius = it },
-                feather = maskFeather, onFeather = { maskFeather = it },
-                opacity = maskOpacity, onOpacity = { maskOpacity = it },
-                componentIndex = maskComponent, onComponent = { maskComponent = it },
-                adjusting = maskAdjusting, onAdjusting = { maskAdjusting = it },
-                onToneDragging = { toneDragging = it },
-                showOverlay = maskOverlay, onOverlay = { maskOverlay = it }, onClose = ::finishMasks,
-                modifier = Modifier.align(Alignment.BottomCenter).height(editorPanelHeight)
-                    .onSizeChanged { maskPanelHeight = it.height },
-                thumbnail = histogramBitmap,
             )
         }
 
@@ -688,11 +514,9 @@ fun PhotoPagerScreen(
                         if (currentFileType == PhotoFileType.CR3) StudioChoice("RAW 内嵌 JPEG", { exportEmbedded = true }, symbol = StudioSymbol.Images, selected = exportEmbedded)
                         Spacer(Modifier.height(12.dp))
                         ExifRow("格式", "JPEG")
-                        ExifRow("尺寸", if (exportEmbedded) "机内预览尺寸" else "原始尺寸")
-                        ExifRow("调整", if (exportEmbedded) "不应用调色与蒙版" else "全局调色与蒙版")
-                        if (exportEmbedded) Text("直接提取内嵌文件，保留机内 JPEG 画质与元数据。",
-                            style = MaterialTheme.typography.bodySmall, color = StudioColors.Muted,
-                            modifier = Modifier.padding(top = 12.dp))
+                        val size = decodedMap[current.uri]?.let { currentGeometry.outputSize(it.width, it.height) }
+                        ExifRow("尺寸", if (exportEmbedded) "机内预览尺寸" else size?.let { "${it.first} × ${it.second}" } ?: "原始尺寸")
+                        ExifRow("调整", if (exportEmbedded) "不应用编辑" else "调色、蒙版、裁切与旋转")
                     }
                 },
                 confirmButton = { Button(onClick = {
@@ -701,6 +525,7 @@ fun PhotoPagerScreen(
                 }, enabled = !exporting) { Text("导出到相册") } },
                 dismissButton = { TextButton(onClick = { showExport = false }) { Text("取消") } })
         }
+
 
     }
 }

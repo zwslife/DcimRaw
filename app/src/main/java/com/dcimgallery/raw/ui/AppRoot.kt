@@ -141,6 +141,9 @@ fun AppRoot(viewModel: MainViewModel = viewModel()) {
     val tonePreview by viewModel.tonePreview.collectAsState()
     val toneFull by viewModel.toneFull.collectAsState()
     val masks by viewModel.masks.collectAsState()
+    val geometry by viewModel.geometry.collectAsState()
+    val editingUri by viewModel.editingUri.collectAsState()
+    val editBusy by viewModel.editBusy.collectAsState()
     val canPasteEdits by viewModel.canPasteEdits.collectAsState()
     val toast by viewModel.toast.collectAsState()
     val selecting by viewModel.selecting.collectAsState()
@@ -175,9 +178,26 @@ fun AppRoot(viewModel: MainViewModel = viewModel()) {
     }
 
     val hasAnySource = treeUri != null || hasMediaPermission
+    val editingPhoto = photos.firstOrNull { it.uri == editingUri }
+    val editingDecoded = editingUri?.let { decodedMap[it] }
 
     Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         when {
+            editingPhoto != null && editingDecoded != null -> PhotoEditorScreen(
+                photo = editingPhoto, decoded = editingDecoded,
+                frame = toneFull?.takeIf { it.first == editingUri }?.second
+                    ?: tonePreview?.takeIf { it.first == editingUri }?.second ?: editingDecoded,
+                tone = toneParams[editingPhoto.uri] ?: com.dcimgallery.raw.core.tone.ToneParams(),
+                layers = masks[editingPhoto.uri].orEmpty(),
+                geometry = geometry[editingPhoto.uri] ?: com.dcimgallery.raw.core.geometry.PhotoGeometry(),
+                busy = editBusy,
+                onTone = { viewModel.setTone(editingPhoto.uri, it) },
+                onMasks = { viewModel.setMasks(editingPhoto.uri, it) },
+                onGeometry = { viewModel.setGeometry(editingPhoto.uri, it) },
+                onFinish = { viewModel.finishEditing(it) },
+                onEnsureEngine = { viewModel.ensureToneEngine(editingPhoto) },
+                onRenderFull = { viewModel.renderToneFullDisplay(editingPhoto) },
+            )
             !hasAnySource -> PermissionScreen(
                 onGrantLocal = { mediaPermissionLauncher.launch(requiredMediaPermissions()) },
                 onPickDirectory = { treeLauncher.launch(null) },
@@ -188,11 +208,13 @@ fun AppRoot(viewModel: MainViewModel = viewModel()) {
                 decodedMap = decodedMap,
                 exporting = exporting,
                 deleting = deleting,
+                editBusy = editBusy,
+                onBeginEditing = { viewModel.beginEditing(it) },
                 toneParams = toneParams,
                 tonePreview = tonePreview,
                 toneFull = toneFull,
                 masks = masks,
-                onMasksChange = viewModel::setMasks,
+                geometry = geometry,
                 canPasteEdits = canPasteEdits,
                 onCopyEdits = viewModel::copyEdits,
                 onPasteEdits = viewModel::pasteEdits,
@@ -206,7 +228,6 @@ fun AppRoot(viewModel: MainViewModel = viewModel()) {
                 onExport = { requestExport(it, false) },
                 onExportEmbedded = { requestExport(it, true) },
                 onDelete = { pendingDelete = listOf(it) },
-                onToneChange = viewModel::setTone,
                 onEnsureToneEngine = viewModel::ensureToneEngine,
                 onTonePanelDone = viewModel::renderToneFullDisplay,
                 onPageChanged = viewModel::onPagerPageChanged,

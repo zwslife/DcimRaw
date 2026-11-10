@@ -6,6 +6,8 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.security.MessageDigest
+import com.dcimgallery.raw.core.geometry.CropRect
+import com.dcimgallery.raw.core.geometry.PhotoGeometry
 
 /** 非破坏性编辑保存在应用私有目录，原始 CR3 不会被修改。 */
 class PhotoEditStore(context: Context) {
@@ -39,12 +41,23 @@ class PhotoEditStore(context: Context) {
                             List(starts.length()) { starts.getInt(it) }.filter { it in 1 until points.length() }
                         }.orEmpty())
                 })
-        })
+        }, root.optJSONObject("geometry")?.let { geometry ->
+            val crop = geometry.optJSONObject("crop")
+            PhotoGeometry(geometry.optInt("quarterTurns"), geometry.optDouble("straighten", 0.0).toFloat(),
+                if (crop == null) CropRect() else CropRect(crop.optDouble("left", 0.0).toFloat(),
+                    crop.optDouble("top", 0.0).toFloat(), crop.optDouble("right", 1.0).toFloat(),
+                    crop.optDouble("bottom", 1.0).toFloat())).normalized()
+        } ?: PhotoGeometry())
     }.getOrNull()
 
     @Synchronized
     fun save(uri: String, edits: PhotoEdits) {
-        val root = JSONObject().put("version", 4).put("tone", toneJson(edits.tone))
+        val root = JSONObject().put("version", 5).put("tone", toneJson(edits.tone))
+        val geometry = edits.geometry.normalized()
+        root.put("geometry", JSONObject().put("quarterTurns", geometry.quarterTurns)
+            .put("straighten", geometry.straighten.toDouble()).put("crop", JSONObject()
+                .put("left", geometry.crop.left.toDouble()).put("top", geometry.crop.top.toDouble())
+                .put("right", geometry.crop.right.toDouble()).put("bottom", geometry.crop.bottom.toDouble())))
         root.put("masks", JSONArray().apply {
             edits.masks.forEach { mask -> put(JSONObject().put("id", mask.id).put("name", mask.name)
                 .put("inverted", mask.inverted).put("enabled", mask.enabled).put("tone", toneJson(mask.tone))

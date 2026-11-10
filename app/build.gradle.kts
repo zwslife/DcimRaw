@@ -65,8 +65,9 @@ android {
         applicationId = "com.dcimgallery.raw"
         minSdk = 26
         targetSdk = 34
-        versionCode = 44
-        versionName = "0.9.20"
+        versionCode = 47
+        versionName = "0.9.23"
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField("boolean", "PRIVACY_POLICY_READY", policyReady.toString())
         buildConfigField("String", "PRIVACY_POLICY_VERSION", "\"$policyVersion\"")
 
@@ -160,4 +161,6 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
     implementation("androidx.datastore:datastore-preferences:1.1.1")
     debugImplementation("androidx.compose.ui:ui-tooling")
+    androidTestImplementation("androidx.test:runner:1.6.2")
+    androidTestImplementation("androidx.test.ext:junit:1.2.1")
 }

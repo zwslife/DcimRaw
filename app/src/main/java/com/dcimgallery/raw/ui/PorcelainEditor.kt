@@ -23,6 +23,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.semantics.*
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.sp
 import com.dcimgallery.raw.core.tone.ToneParams
 import kotlin.math.abs
@@ -31,9 +32,10 @@ internal val EditorPine = Color(0xFF28644D)
 private val EditorMuted = Color(0xFF859087)
 
 @Composable
-internal fun PorcelainPanel(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
+internal fun PorcelainPanel(modifier: Modifier = Modifier, embedded: Boolean = false,
+    content: @Composable ColumnScope.() -> Unit) {
     Column(modifier.fillMaxSize().clip(RoundedCornerShape(topStart = 26.dp, topEnd = 26.dp))
-        .background(Color.White).navigationBarsPadding()) {
+        .background(Color.White).then(if (embedded) Modifier else Modifier.navigationBarsPadding())) {
         Box(Modifier.fillMaxWidth().height(9.dp), contentAlignment = Alignment.BottomCenter) {
             Box(Modifier.size(26.dp, 3.dp).clip(CircleShape).background(Color(0xFFDFE6DC)))
         }
@@ -43,12 +45,12 @@ internal fun PorcelainPanel(modifier: Modifier = Modifier, content: @Composable 
 
 @Composable
 internal fun PorcelainHeader(onUndo: () -> Unit, onDone: () -> Unit, canUndo: Boolean,
-    onRedo: () -> Unit, canRedo: Boolean) {
+    onRedo: () -> Unit, canRedo: Boolean, showDone: Boolean = true) {
     Row(Modifier.fillMaxWidth().height(40.dp).padding(horizontal = 16.dp),
         horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
         EditorAction(StudioSymbol.Undo2, "撤回上一次调整", onUndo, enabled = canUndo)
         EditorAction(StudioSymbol.Redo2, "重做上一次调整", onRedo, enabled = canRedo)
-        EditorAction(StudioSymbol.Check, "确认调整", onDone, filled = true)
+        if (showDone) EditorAction(StudioSymbol.Check, "确认调整", onDone, filled = true)
     }
 }
 
@@ -116,13 +118,14 @@ internal fun EditorColorTabs(selected: Int, onSelect: (Int) -> Unit) {
 /** Signed controls start at zero; other controls start at the left end of the track. */
 @Composable
 internal fun ParameterSlider(label: String, display: String, value: Float, range: ClosedFloatingPointRange<Float>,
-    default: Float, controlKey: String, onChange: (Float) -> Unit, onGesture: (Boolean) -> Unit = {}) {
+    default: Float, controlKey: String, onChange: (Float) -> Unit, onGesture: (Boolean) -> Unit = {},
+    labelWidth: Dp = 80.dp) {
     val current by rememberUpdatedState(value)
     val change by rememberUpdatedState(onChange)
     val gesture by rememberUpdatedState(onGesture)
     DisposableEffect(controlKey) { onDispose { gesture(false) } }
     Row(Modifier.fillMaxWidth().height(48.dp), verticalAlignment = Alignment.CenterVertically) {
-        Row(Modifier.width(80.dp), verticalAlignment = Alignment.CenterVertically,
+        Row(Modifier.width(labelWidth), verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             Text(label, color = Color(0xFF6C7A6E), fontSize = 12.sp, modifier = Modifier.widthIn(max = 64.dp).weight(1f, fill = false))
             Text(display, color = if (abs(value - default) > .0001f) EditorPine else EditorMuted,

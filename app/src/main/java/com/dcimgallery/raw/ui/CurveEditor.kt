@@ -16,6 +16,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
@@ -87,11 +88,7 @@ internal fun CurveEditor(params: ToneParams, onChange: (ToneParams) -> Unit,
                     gesture(true); update(ToneCurve().points); selectedPoint = -1; gesture(false)
                 }.padding(10.dp))
         }
-        Row(Modifier.fillMaxWidth().padding(vertical = 5.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text(listOf("↑ 提亮", "↑ 增加红色", "↑ 增加绿色", "↑ 增加蓝色")[channel], color = tint, fontSize = 11.sp)
-            Text(listOf("↓ 压暗", "↓ 偏青色", "↓ 偏品红", "↓ 偏黄色")[channel],
-                color = listOf(Color(0xFF65736A), Color(0xFF15969D), Color(0xFFB75A9A), Color(0xFF9C811D))[channel], fontSize = 11.sp)
-        }
+        Spacer(Modifier.height(6.dp))
         Canvas(Modifier.fillMaxWidth().weight(1f).clip(RoundedCornerShape(12.dp))
             .background(Color(0xFFF6F8F5))
             .semantics { contentDescription = "${names[channel]}曲线，点按添加控制点，拖动调整，双击删除中间点" }
@@ -127,6 +124,17 @@ internal fun CurveEditor(params: ToneParams, onChange: (ToneParams) -> Unit,
             }) {
             val inset = 14.dp.toPx(); val w = size.width - inset*2; val h = size.height - inset*2
             fun position(x: Float, y: Float) = Offset(inset + x*w, inset + (1f - y)*h)
+            // Signed distance from the identity diagonal: transparent at neutral,
+            // increasingly colored toward the upper-left/lower-right corners.
+            val upper = listOf(Color.White, Color(0xFFE54B47), Color(0xFF36A45B), Color(0xFF457BE8))[channel]
+            val lower = listOf(Color(0xFF25332C), Color(0xFF10BFC7), Color(0xFFD34DB8), Color(0xFFE6C52E))[channel]
+            val center = Offset(inset + w / 2f, inset + h / 2f)
+            val normal = Offset(h, w) * (w * h / (w * w + h * h))
+            drawRect(Brush.linearGradient(
+                0f to upper.copy(alpha = .48f), .5f to upper.copy(alpha = 0f),
+                1f to lower.copy(alpha = .48f),
+                start = center - normal, end = center + normal),
+                topLeft = Offset(inset, inset), size = androidx.compose.ui.geometry.Size(w, h))
             repeat(5) { i ->
                 val f = i/4f; val grid = Color(0xFFE0E6DF)
                 drawLine(grid, position(f, 0f), position(f, 1f), 1.dp.toPx())
@@ -147,9 +155,8 @@ internal fun CurveEditor(params: ToneParams, onChange: (ToneParams) -> Unit,
             }
         }
         val point = curve.points.getOrNull(selectedPoint)
-        Row(Modifier.fillMaxWidth().height(28.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text(if (point == null) "点按添加 · 拖动调整 · 双击删除" else
-                "输入 ${(point.x*255).roundToInt()} · 输出 ${(point.y*255).roundToInt()}",
+        if (point != null) Row(Modifier.fillMaxWidth().height(28.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text("输入 ${(point.x*255).roundToInt()} · 输出 ${(point.y*255).roundToInt()}",
                 fontSize = 10.sp, color = Color(0xFF859087))
             Spacer(Modifier.weight(1f))
             if (selectedPoint > 0 && selectedPoint < curve.points.lastIndex) {

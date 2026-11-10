@@ -15,6 +15,8 @@ import com.dcimgallery.raw.core.tone.MaskLayer
 import com.dcimgallery.raw.core.tone.MaskRenderCache
 import com.dcimgallery.raw.core.cr3.Cr3Parser
 import com.dcimgallery.raw.core.cr3.extractFullJpegPreview
+import com.dcimgallery.raw.core.geometry.PhotoGeometry
+import com.dcimgallery.raw.core.geometry.PhotoGeometryRenderer
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -143,21 +145,27 @@ class RawDecodeRepository(private val app: GalleryApp) {
      * 调色矩阵与预览 GPU 渲染共用同一份参数，所见即所得。
      * @return null 表示成功；否则为失败原因（用于界面提示）。
      */
-    suspend fun exportJpeg(uriString: String, displayName: String, tone: ToneParams, masks: List<MaskLayer> = emptyList()): String? =
+    suspend fun exportJpeg(uriString: String, displayName: String, tone: ToneParams,
+        masks: List<MaskLayer> = emptyList(), geometry: PhotoGeometry = PhotoGeometry()): String? =
         withContext(Dispatchers.IO) {
+            var pending: Uri? = null
+            var colored: Bitmap? = null
+            var transformed: Bitmap? = null
             try {
                 val bitmap = decode(uriString) ?: return@withContext "图片解码失败"
-                val outBitmap = if (tone.isNeutral && masks.none { it.enabled && !it.tone.isNeutral }) {
+                val colorBitmap = if (tone.isNeutral && masks.none { it.enabled && !it.tone.isNeutral }) {
                     bitmap
                 } else {
                     val data = tone.toRenderData()
-                    val dst = Bitmap.createBitmap(bitmap.width, bitmap.height, Bitmap.Config.ARGB_8888)
+                    val dst = Bitmap.createBitmap(bitmap.width, bitmap.height, Bitmap.Config.ARGB_8888).also { colored = it }
                     if (!RawDecoder.renderToneFull(bitmap, data.matrix, data.lut, data.hsl, data.effects, dst) ||
                         !MaskRenderCache().apply(dst, masks)) {
-                        dst.recycle()
                         return@withContext "调色渲染失败"
                     }
                     dst
+                }
+                val outBitmap = PhotoGeometryRenderer.render(colorBitmap, geometry).also {
+                    if (it !== colorBitmap) transformed = it
                 }
 
                 val resolver = app.contentResolver
@@ -173,23 +181,27 @@ class RawDecodeRepository(private val app: GalleryApp) {
                 val itemUri = resolver.insert(
                     MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values,
                 ) ?: return@withContext "系统相册写入被拒绝"
+                pending = itemUri
 
                 val written = resolver.openOutputStream(itemUri)?.use { out ->
                     outBitmap.compress(Bitmap.CompressFormat.JPEG, 92, out)
                 } ?: false
-                if (outBitmap !== bitmap) outBitmap.recycle()
                 if (!written) {
-                    resolver.delete(itemUri, null, null)
                     return@withContext "文件写入失败"
                 }
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                     values.clear()
                     values.put(MediaStore.Images.Media.IS_PENDING, 0)
-                    resolver.update(itemUri, values, null, null)
+                    check(resolver.update(itemUri, values, null, null) > 0) { "无法发布相册文件" }
                 }
+                pending = null
                 null
             } catch (e: Exception) {
                 e.message ?: "未知错误"
+            } finally {
+                transformed?.recycle()
+                colored?.recycle()
+                pending?.let { runCatching { app.contentResolver.delete(it, null, null) } }
             }
         }
 }

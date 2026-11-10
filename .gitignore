@@ -16,6 +16,8 @@ externalNativeBuild/
 publishing/private/
 *.jks
 *.keystore
+*.p12
+*signing-backup*.zip
 keystore.properties
 publishing/vivo/*.zip
 publishing/ruotu-privacy-site/

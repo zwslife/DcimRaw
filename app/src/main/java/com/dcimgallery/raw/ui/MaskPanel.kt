@@ -48,7 +48,7 @@ fun MaskPanel(
     adjusting: Boolean, onAdjusting: (Boolean) -> Unit,
     onToneDragging: (Boolean) -> Unit,
     showOverlay: Boolean, onOverlay: (Boolean) -> Unit, onClose: () -> Unit,
-    modifier: Modifier = Modifier, thumbnail: Bitmap? = null,
+    modifier: Modifier = Modifier, thumbnail: Bitmap? = null, embedded: Boolean = false,
 ) {
     val selected = layers.firstOrNull { it.id == selectedId }
     val sections = remember { mutableStateMapOf<String, Int>() }
@@ -96,7 +96,7 @@ fun MaskPanel(
         }
     }
     Box(modifier.fillMaxWidth()) {
-        PorcelainPanel {
+        PorcelainPanel(embedded = embedded) {
             PorcelainHeader(onUndo = {
                 if (history.isNotEmpty()) {
                     val snapshot = history.removeAt(history.lastIndex)
@@ -110,7 +110,7 @@ fun MaskPanel(
                     history.add(layers); restoring = true; onChange(snapshot)
                     if (snapshot.none { it.id == selectedId }) onSelect(snapshot.lastOrNull()?.id)
                 }
-            }, canRedo = redo.isNotEmpty())
+            }, canRedo = redo.isNotEmpty(), showDone = !embedded)
             if (selected != null) EditorTabs(section, { sections[selected.id] = it },
                 includeRange = true, includeCurves = false)
             Column(Modifier.weight(1f).verticalScroll(scroll).padding(horizontal = 18.dp, vertical = 6.dp)) {
@@ -126,7 +126,6 @@ fun MaskPanel(
                 if (selected == null) {
                     Column(Modifier.fillMaxWidth().padding(vertical = 12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                         StudioIcon(StudioSymbol.Scan, tint = EditorPine)
-                        Text("创建蒙版，开始局部调整", color = StudioColors.Muted, fontSize = 12.sp, modifier = Modifier.padding(12.dp))
                         MenuAction("新建蒙版", StudioSymbol.Plus) { dialog = "create" }
                     }
                 } else if (section == -1) {

@@ -1,8 +1,10 @@
 package com.dcimgallery.raw.core.tone
 
 import java.util.UUID
+import com.dcimgallery.raw.core.geometry.PhotoGeometry
 
-data class PhotoEdits(val tone: ToneParams = ToneParams(), val masks: List<MaskLayer> = emptyList())
+data class PhotoEdits(val tone: ToneParams = ToneParams(), val masks: List<MaskLayer> = emptyList(),
+    val geometry: PhotoGeometry = PhotoGeometry())
 
 /** App-local clipboard owns a detached snapshot, including normalized mask geometry. */
 class PhotoEditClipboard {

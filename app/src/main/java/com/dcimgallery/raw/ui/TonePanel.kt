@@ -22,12 +22,12 @@ fun TonePanel(photoName: String, params: ToneParams, onParamsChange: (ToneParams
     val scroll = rememberScrollState()
     LaunchedEffect(section) { scroll.scrollTo(0) }
     LaunchedEffect(section) { onCurveSection(section == 6) }
-    PorcelainPanel {
+    PorcelainPanel(embedded = compactHeader) {
         PorcelainHeader(onUndo = {
             if (history.isNotEmpty()) { redo.add(current); onParamsChange(history.removeAt(history.lastIndex)) }
         }, onDone = onClose, canUndo = history.isNotEmpty(), onRedo = {
             if (redo.isNotEmpty()) { history.add(current); onParamsChange(redo.removeAt(redo.lastIndex)) }
-        }, canRedo = redo.isNotEmpty())
+        }, canRedo = redo.isNotEmpty(), showDone = !compactHeader)
         EditorTabs(section, { section = it })
         Column(Modifier.weight(1f).then(if (section == 6) Modifier else Modifier.verticalScroll(scroll))
             .padding(horizontal = 18.dp, vertical = 6.dp)) {
