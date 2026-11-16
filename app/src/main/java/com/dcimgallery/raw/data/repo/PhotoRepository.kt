@@ -12,7 +12,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
-/** 照片索引仓库：合并本机相册（MediaStore）与外接盘 CR3（SAF）两个来源。 */
+/** 照片索引仓库：合并本机相册（MediaStore）与授权目录（SAF）两个来源。 */
 class PhotoRepository(private val app: GalleryApp) {
 
     private val dao get() = app.db.photoDao()

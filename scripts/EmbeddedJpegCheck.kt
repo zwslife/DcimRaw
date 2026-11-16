@@ -15,9 +15,11 @@ fun main(args: Array<String>) {
             val image = ImageIO.read(bytes.inputStream()) ?: error("Invalid JPEG: $name")
             val header = ByteArray(12).also { input.seek(0); input.readFully(it) }
             val type = PhotoFileType.fromHeader(header)
+            val medium = parser.readGridPreview(320)
             val original = if (parser.isStandaloneJpeg()) {
                 check(type == PhotoFileType.JPEG) { "JPEG content must never receive a RAW badge" }
                 check(parser.parseTracks() == null)
+                check(medium == null) { "Standalone JPEGs should use the ordinary sampled decoder" }
                 file.readBytes()
             } else {
                 check(type == PhotoFileType.CR3) { "Actual CR3 must keep its RAW badge" }
@@ -25,6 +27,10 @@ fun main(args: Array<String>) {
                 val jpegTracks = tracks.filter { track -> input.seek(track.chunkOffsets[0]); input.readUnsignedShort() == 0xffd8 }
                 val largest = jpegTracks.maxBy { it.pixels }
                 check(image.width == largest.width && image.height == largest.height)
+                val thumbnail = ImageIO.read(checkNotNull(medium).inputStream())
+                check(minOf(thumbnail.width, thumbnail.height) >= 320 && medium.size < bytes.size)
+                check(parser.readGridPreview(largest.width) == null) { "Large requests must fall back to the full preview" }
+                println("PASS: ${file.name} grid reads ${medium.size} JPEG bytes instead of ${bytes.size}")
                 ByteArray(largest.sampleSizes[0].toInt()).also { input.seek(largest.chunkOffsets[0]); input.readFully(it) }
             }
             check(bytes.contentEquals(original)) { "Extraction changed original JPEG bytes" }

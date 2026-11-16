@@ -5,62 +5,58 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.dcimgallery.raw.core.tone.ColorGrade
 import com.dcimgallery.raw.core.tone.ToneParams
 
-/** Porcelain controls: categories above a vertically scrolling parameter list. */
 @Composable
-fun TonePanel(photoName: String, params: ToneParams, onParamsChange: (ToneParams) -> Unit,
-    onReset: () -> Unit, onClose: () -> Unit, compactHeader: Boolean = false,
-    onDraggingChange: (Boolean) -> Unit = {}, onCurveSection: (Boolean) -> Unit = {}) {
-    var section by rememberSaveable(photoName) { mutableIntStateOf(0) }
-    val history = remember(photoName) { mutableStateListOf<ToneParams>() }
-    val redo = remember(photoName) { mutableStateListOf<ToneParams>() }
-    var before by remember(photoName) { mutableStateOf<ToneParams?>(null) }
-    val current by rememberUpdatedState(params)
+internal fun TonePanel(photoName: String, section: Int, params: ToneParams,
+    onParamsChange: (ToneParams) -> Unit, onGesture: (Boolean) -> Unit,
+    onPick: (EditTool) -> Unit) {
+    var channel by rememberSaveable(photoName) { mutableIntStateOf(0) }
+    var grade by rememberSaveable(photoName) { mutableIntStateOf(1) }
     val scroll = rememberScrollState()
     LaunchedEffect(section) { scroll.scrollTo(0) }
-    LaunchedEffect(section) { onCurveSection(section == 6) }
-    PorcelainPanel(embedded = compactHeader) {
-        PorcelainHeader(onUndo = {
-            if (history.isNotEmpty()) { redo.add(current); onParamsChange(history.removeAt(history.lastIndex)) }
-        }, onDone = onClose, canUndo = history.isNotEmpty(), onRedo = {
-            if (redo.isNotEmpty()) { history.add(current); onParamsChange(redo.removeAt(redo.lastIndex)) }
-        }, canRedo = redo.isNotEmpty(), showDone = !compactHeader)
-        EditorTabs(section, { section = it })
+    PorcelainPanel {
+        Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+            EditorToolPicker(ToneTools[section], onPick)
+            Spacer(Modifier.weight(1f))
+            when (section) {
+                6 -> EditorColorTabs(channel, { channel = it }, Modifier.widthIn(max = 176.dp)
+                    .fillMaxWidth(.7f), curves = true)
+                4 -> {
+                    GradeTabs(grade, { grade = it }, Modifier.weight(4f, fill = false))
+                    EditorAction(StudioSymbol.RotateCcw, "复位当前分级", {
+                        val grading = List(4) { index ->
+                            if (index == grade) ColorGrade()
+                            else params.grading.getOrElse(index) { ColorGrade() }
+                        }
+                        onParamsChange(params.copy(grading = grading))
+                    })
+                }
+            }
+        }
         Column(Modifier.weight(1f).then(if (section == 6) Modifier else Modifier.verticalScroll(scroll))
-            .padding(horizontal = 18.dp, vertical = 6.dp)) {
-            ToneRows(section, params, { next ->
-                before?.takeIf { it != next }?.let { history.add(it); redo.clear(); before = null }
-                onParamsChange(next)
-            }, photoName, onGesture = { active ->
-                if (active) before = current else before = null
-                onDraggingChange(active)
-            })
+            .padding(horizontal = 16.dp, vertical = 4.dp)) {
+            ToneRows(section, params, onParamsChange, photoName, onGesture, channel, grade)
         }
     }
 }
 
 @Composable
 internal fun ToneRows(section: Int, params: ToneParams, onChange: (ToneParams) -> Unit,
-    scopeKey: String, onGesture: (Boolean) -> Unit) {
+    scopeKey: String, onGesture: (Boolean) -> Unit, channel: Int = 0, grade: Int = 1) {
     var color by rememberSaveable(scopeKey) { mutableIntStateOf(0) }
     if (section == 6) {
-        CurveEditor(params, onChange, scopeKey, onGesture)
+        CurveEditor(params, onChange, scopeKey, channel, onGesture)
         return
     }
-    if (section == 2) EditorColorTabs(color, { color = it })
+    if (section == 2) EditorColorTabs(color, { color = it }, Modifier.fillMaxWidth())
     if (section == 4) {
-        listOf("阴影", "中间调", "高光", "全局").forEachIndexed { grade, name ->
-            toneControls(4, color, grade, params.blackWhite).take(3).forEach { control ->
-                ToneControlRow(control.copy(label = name + control.label), params, onChange,
-                    "$scopeKey:4:$grade:${control.id}", onGesture)
-            }
-        }
-        toneControls(4, color, 0, params.blackWhite).drop(3).forEach { control ->
-            ToneControlRow(control.copy(label = "分级" + control.label), params, onChange,
-                "$scopeKey:4:${control.id}", onGesture)
+        toneControls(4, color, grade, params.blackWhite).forEach { control ->
+            ToneControlRow(control, params, onChange, "$scopeKey:4:$grade:" + control.id, onGesture)
         }
     } else {
         val controls = toneControls(section, color, 0, params.blackWhite)

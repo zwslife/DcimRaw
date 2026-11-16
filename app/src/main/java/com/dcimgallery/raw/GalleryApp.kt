@@ -3,9 +3,11 @@ package com.dcimgallery.raw
 import android.app.Application
 import coil.ImageLoader
 import coil.ImageLoaderFactory
+import coil.disk.DiskCache
 import coil.memory.MemoryCache
 import com.dcimgallery.raw.core.coil.Cr3Fetcher
 import com.dcimgallery.raw.core.coil.Cr3ImageKeyer
+import com.dcimgallery.raw.core.coil.GalleryThumbnailFetcher
 import com.dcimgallery.raw.core.coil.PreviewCache
 import com.dcimgallery.raw.core.raw.DecodedCache
 import com.dcimgallery.raw.data.db.AppDatabase
@@ -18,6 +20,13 @@ class GalleryApp : Application(), ImageLoaderFactory {
     lateinit var imageLoader: ImageLoader
         private set
 
+    internal val galleryThumbnails by lazy {
+        DiskCache.Builder()
+            .directory(cacheDir.resolve("gallery_thumbnails"))
+            .maxSizeBytes(128L * 1024 * 1024)
+            .build()
+    }
+
     override fun onCreate() {
         super.onCreate()
         CrashRecord.install(this)
@@ -25,7 +34,11 @@ class GalleryApp : Application(), ImageLoaderFactory {
         PreviewCache.init(this)
         DecodedCache.init(this)
         imageLoader = ImageLoader.Builder(this)
-            .components { add(Cr3Fetcher.Factory(this@GalleryApp)); add(Cr3ImageKeyer()) }
+            .components {
+                add(Cr3Fetcher.Factory(this@GalleryApp))
+                add(Cr3ImageKeyer())
+                add(GalleryThumbnailFetcher.Factory(this@GalleryApp) { galleryThumbnails })
+            }
             .memoryCache {
                 MemoryCache.Builder(this@GalleryApp)
                     .maxSizePercent(0.25)

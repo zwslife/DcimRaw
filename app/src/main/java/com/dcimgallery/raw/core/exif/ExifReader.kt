@@ -25,9 +25,9 @@ data class ExifInfo(
 
 /**
  * EXIF 读取器。
- * - 外接 CR3：解析 moov → uuid → CMT1/CMT2（小端 TIFF），权威来源
+ * - CR3：解析 moov → uuid → CMT1/CMT2（小端 TIFF），权威来源
  *   （实测：内嵌预览不带 EXIF，XMP 盒可能为空）
- * - 本机照片（JPEG/HEIC）：直接用 androidx ExifInterface 读流
+ * - 普通照片（JPEG/HEIC）：直接用 androidx ExifInterface 读流
  */
 object ExifReader {
 
@@ -46,13 +46,8 @@ object ExifReader {
     private const val TAG_LENS_MODEL = 0xA434
     private const val TAG_FOCAL_35MM = 0xA405
 
-    fun read(context: Context, uri: Uri, source: String): ExifInfo? {
-        if (source != "external") return readLocal(context, uri)
-        val jpeg = runCatching {
-            context.contentResolver.openInputStream(uri)?.use { it.read() == 0xFF && it.read() == 0xD8 }
-        }.getOrDefault(false) == true
-        return if (jpeg) readLocal(context, uri) else readCr3(context, uri)
-    }
+    fun read(context: Context, uri: Uri, isCr3: Boolean): ExifInfo? =
+        if (isCr3) readCr3(context, uri) ?: readLocal(context, uri) else readLocal(context, uri)
 
     // ---- 外接 CR3：CMT 盒 TIFF ----
 

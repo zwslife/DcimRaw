@@ -36,6 +36,10 @@ class Cr3Parser private constructor(private val ch: FileChannel) {
     companion object {
         private val CONTAINERS = setOf("moov", "trak", "mdia", "minf", "stbl", "edts", "udta", "dinf")
         private const val MAX_LEAF_READ = 4L * 1024 * 1024 // 样本表最大读取 4MB
+        private val PREVIEW_UUID = byteArrayOf(
+            0xea.toByte(), 0xf4.toByte(), 0x2b, 0x5e, 0x1c, 0x98.toByte(), 0x4b, 0x88.toByte(),
+            0xb9.toByte(), 0xfb.toByte(), 0xb7.toByte(), 0xdc.toByte(), 0x40, 0x6e, 0x4d, 0x16,
+        )
 
         /** 打开文件描述符并返回解析器；调用方负责关闭 pfd。 */
         fun open(pfd: ParcelFileDescriptor): Cr3Parser =
@@ -56,7 +60,11 @@ class Cr3Parser private constructor(private val ch: FileChannel) {
         val type = String(tb, Charsets.ISO_8859_1)
         var header = 8
         when {
-            size == 1L -> { size = buf.long; header = 16 }
+            size == 1L -> {
+                if (buf.remaining() < 8) return null
+                size = buf.long
+                header = 16
+            }
             size == 0L -> size = ch.size() - pos
         }
         if (size < header || size <= 0) return null
@@ -238,6 +246,38 @@ class Cr3Parser private constructor(private val ch: FileChannel) {
 
     /** Some transferred files retain a .CR3 name even though their content is already JPEG. */
     fun readStandaloneJpeg(): ByteArray? = if (isStandaloneJpeg()) readSample(0, ch.size()) else null
+
+    /** Reads the camera's medium JPEG when it can fill a grid tile without enlargement. */
+    internal fun readGridPreview(edge: Int): ByteArray? {
+        val fileSize = ch.size()
+        val type = readBoxHeader(0) ?: return null
+        if (type.type != "ftyp" || type.payloadSize < 4 ||
+            String(peekAt(type.payloadStart, 4), Charsets.ISO_8859_1) != "crx ") return null
+        var pos = type.size
+        while (pos <= fileSize - 8) {
+            val box = readBoxHeader(pos) ?: return null
+            if (box.size > fileSize - pos || box.type == "mdat") return null
+            if (box.type == "uuid" && box.payloadSize >= 48 &&
+                peekAt(box.payloadStart, 16).contentEquals(PREVIEW_UUID)) {
+                // The UUID is followed by an 8-byte container prefix and a PRVW box.
+                val preview = readBoxHeader(box.payloadStart + 24) ?: return null
+                if (preview.type != "PRVW" || preview.size > box.start + box.size - preview.start ||
+                    preview.payloadSize < 19) return null
+                val fields = readPayload(preview, 16)
+                if (fields.remaining() < 16) return null
+                val width = fields.getShort(6).toInt() and 0xffff
+                val height = fields.getShort(8).toInt() and 0xffff
+                val length = fields.getInt(12).toLong() and 0xffffffffL
+                if (minOf(width, height) < edge || length !in 3..MAX_LEAF_READ ||
+                    length > preview.payloadSize - 16) return null
+                val start = preview.payloadStart + 16
+                if (!peekAt(start, 3).contentEquals(byteArrayOf(-1, -40, -1))) return null
+                return readSample(start, length)
+            }
+            pos += box.size
+        }
+        return null
+    }
 
     fun peekAt(offset: Long, count: Int): ByteArray {
         val buf = ByteBuffer.allocate(count)

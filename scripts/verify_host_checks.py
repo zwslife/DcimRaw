@@ -29,9 +29,11 @@ output.mkdir(parents=True, exist_ok=True)
 sources = [src / p for p in ['core/geometry/PhotoGeometry.kt', 'core/tone/ToneParams.kt',
     'core/tone/MaskLayer.kt', 'core/tone/PhotoEditClipboard.kt', 'core/tone/HistogramData.kt',
     'core/tone/TonePreviewScheduler.kt', 'data/scan/ScanBatcher.kt', 'data/repo/IncrementalIndex.kt',
-    'core/media/DeletionSession.kt']]
+    'core/media/DeletionSession.kt', 'core/media/GallerySelectionRange.kt',
+    'core/tone/AdaptiveLooks.kt', 'core/tone/FaceLightTone.kt']]
 checks = ['PhotoGeometryCheck', 'MaskGeometryCheck', 'PhotoEditClipboardCheck', 'ToneEffectsCheck',
-    'HistogramCheck', 'TonePreviewSchedulerCheck', 'GalleryLoadingCheck', 'PhotoDeletionCheck']
+    'HistogramCheck', 'TonePreviewSchedulerCheck', 'GalleryLoadingCheck', 'PhotoDeletionCheck',
+    'GallerySelectionCheck', 'AdaptiveLooksCheck']
 sources += [root / 'scripts' / f'{name}.kt' for name in checks]
 target = output / 'checks.jar'
 subprocess.run([java, '-cp', os.pathsep.join(compiler), 'org.jetbrains.kotlin.cli.jvm.K2JVMCompiler',

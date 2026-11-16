@@ -12,6 +12,10 @@ import kotlinx.coroutines.withContext
  * 授权目录扫描器：每个目录用一次 SAF 查询批量取得属性，分批交给索引仓库。
  */
 class MediaScanner(private val context: Context) {
+    private val rasterExtensions = setOf("jpg", "jpeg", "png", "webp", "heic", "heif", "gif", "bmp", "avif")
+    private val rasterMimeTypes = setOf("image/jpeg", "image/png", "image/webp", "image/heic", "image/heif",
+        "image/gif", "image/bmp", "image/avif")
+
 
     data class Found(
         val uri: Uri,
@@ -50,9 +54,11 @@ class MediaScanner(private val context: Context) {
                         currentCoroutineContext().ensureActive()
                         val id = it.getString(idColumn) ?: continue
                         val name = it.getString(nameColumn) ?: continue
-                        if (it.getString(mimeColumn) == DocumentsContract.Document.MIME_TYPE_DIR) {
+                        val mime = it.getString(mimeColumn)?.lowercase()
+                        if (mime == DocumentsContract.Document.MIME_TYPE_DIR) {
                             stack.add(id to if (path.isEmpty()) name else "$path/$name")
-                        } else if (name.endsWith(".cr3", ignoreCase = true)) {
+                        } else if (name.endsWith(".cr3", ignoreCase = true) ||
+                            name.substringAfterLast('.', "").lowercase() in rasterExtensions || mime in rasterMimeTypes) {
                             batches.add(Found(DocumentsContract.buildDocumentUriUsingTree(treeUri, id),
                                 name, it.getLong(sizeColumn), it.getLong(modifiedColumn), path))
                             count++

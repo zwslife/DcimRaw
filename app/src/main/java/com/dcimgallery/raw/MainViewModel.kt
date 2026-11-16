@@ -16,6 +16,7 @@ import android.provider.MediaStore
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.dcimgallery.raw.core.coil.GalleryThumbnail
 import com.dcimgallery.raw.core.coil.PreviewCache
 import com.dcimgallery.raw.core.raw.DecodedCache
 import com.dcimgallery.raw.core.raw.RawDecodeRepository
@@ -44,12 +45,12 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.mapLatest
-import kotlinx.coroutines.flow.transformLatest
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -58,8 +59,6 @@ import kotlinx.coroutines.withContext
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
-import com.dcimgallery.raw.core.raw.PhotoFormatProbe
-import com.dcimgallery.raw.core.raw.PhotoFileType
 
 /** 网格元素：日期分组头或照片。 */
 sealed interface GridItem {
@@ -73,11 +72,16 @@ data class DeleteAuthorization(val id: Long, val sender: IntentSender, val launc
 class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     private val repository = PhotoRepository(app as GalleryApp)
-    private val galleryPreferences = app.getSharedPreferences("gallery-settings", android.content.Context.MODE_PRIVATE)
-    private val _showCr3Only = MutableStateFlow(galleryPreferences.getBoolean("cr3-only", false))
-    val showCr3Only: StateFlow<Boolean> = _showCr3Only
-    private var filterMode: Boolean? = null
-    private var filteredSnapshotReady = false
+    private val _gallerySource = MutableStateFlow<String?>(null)
+    val gallerySource: StateFlow<String?> = _gallerySource
+
+    fun selectGallerySource(source: String) {
+        if (_gallerySource.value == source) return
+        closePager()
+        cancelSelection()
+        _gallerySource.value = source
+    }
+
     private val _selecting = MutableStateFlow(false)
     val selecting: StateFlow<Boolean> = _selecting
     private val _selectedUris = MutableStateFlow<Set<String>>(emptySet())
@@ -90,28 +94,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private var consentId = 0L
     private var currentPhotoUri: String? = null
 
+    private val _hasMediaPermission = MutableStateFlow(false)
+    val hasMediaPermission: StateFlow<Boolean> = _hasMediaPermission
+
     val photos: StateFlow<List<PhotoEntity>> =
-        combine(repository.photos, _showCr3Only) { list, only -> list to only }
-            .transformLatest { (list, only) ->
-                if (filterMode != only) { filterMode = only; filteredSnapshotReady = false }
-                val incremental = !filteredSnapshotReady
-                if (!only) { emit(list); filteredSnapshotReady = true } else {
-                    val matches = ArrayList<PhotoEntity>()
-                    var emittedSize = -1
-                    var lastEmission = 0L
-                    list.chunked(256).forEach { batch ->
-                        val types = PhotoFormatProbe.readBatch(app, batch)
-                        batch.forEachIndexed { i, photo -> if (types[i] == PhotoFileType.CR3) matches += photo }
-                        val now = android.os.SystemClock.uptimeMillis()
-                        if (incremental && matches.size > 0 && matches.size != emittedSize &&
-                            (emittedSize < 0 || now - lastEmission >= 100L)) {
-                            emit(matches.toList()); emittedSize = matches.size; lastEmission = now
-                        }
-                    }
-                    if (emittedSize != matches.size) emit(matches.toList())
-                    filteredSnapshotReady = true
-                }
-            }.onEach { list ->
+        combine(repository.photos, _gallerySource, hasMediaPermission) { list, source, mediaGranted ->
+            val active = source ?: if (mediaGranted) "local" else "external"
+            list.filter { it.source == active }
+        }.flowOn(Dispatchers.Default).onEach { list ->
                 if (_selectedUris.value.isNotEmpty()) {
                     val visible = list.mapTo(HashSet()) { it.uri }
                     _selectedUris.update { it.intersect(visible) }
@@ -121,14 +111,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     selectedIndex.value = -1; currentPhotoUri = null; onPagerPageChanged(null)
                 }
             }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
-
-    fun setShowCr3Only(enabled: Boolean) {
-        if (_showCr3Only.value == enabled) return
-        closePager()
-        cancelSelection()
-        galleryPreferences.edit().putBoolean("cr3-only", enabled).apply()
-        _showCr3Only.value = enabled
-    }
 
     /** 按拍摄日期分组后的网格项（保持 photos 的倒序） */
     val gridItems: StateFlow<List<GridItem>> = photos
@@ -153,8 +135,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     val driveReadable: StateFlow<Boolean> = _driveReadable
 
     /** 本机相册（MediaStore）读取权限 */
-    private val _hasMediaPermission = MutableStateFlow(false)
-    val hasMediaPermission: StateFlow<Boolean> = _hasMediaPermission
 
     /** 全屏查看的照片下标，-1 表示未打开 */
     val selectedIndex = MutableStateFlow(-1)
@@ -189,6 +169,51 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val _editBusy = MutableStateFlow(false)
     val editBusy: StateFlow<Boolean> = _editBusy
 
+    private val undoEdits = ArrayDeque<PhotoEdits>()
+    private val redoEdits = ArrayDeque<PhotoEdits>()
+    private var continuousEdit = false
+    private var recordedGesture = false
+    private val _editHistory = MutableStateFlow(false to false)
+    val editHistory: StateFlow<Pair<Boolean, Boolean>> = _editHistory
+
+    fun editingGesture(active: Boolean) {
+        continuousEdit = active
+        recordedGesture = false
+    }
+
+    private fun publishEditHistory() {
+        _editHistory.value = undoEdits.isNotEmpty() to redoEdits.isNotEmpty()
+    }
+
+    private fun clearEditHistory() {
+        undoEdits.clear()
+        redoEdits.clear()
+        editingGesture(false)
+        publishEditHistory()
+    }
+
+    private fun recordEdit(uri: String) {
+        if (editBaseline?.first != uri || (continuousEdit && recordedGesture)) return
+        if (undoEdits.size == 50) undoEdits.removeFirst()
+        undoEdits.addLast(editSnapshot(uri))
+        redoEdits.clear()
+        recordedGesture = continuousEdit
+        publishEditHistory()
+    }
+
+    fun stepEditHistory(redo: Boolean) {
+        val uri = editBaseline?.first ?: return
+        if (_editBusy.value) return
+        val from = if (redo) redoEdits else undoEdits
+        val to = if (redo) undoEdits else redoEdits
+        val snapshot = from.removeLastOrNull() ?: return
+        to.addLast(editSnapshot(uri))
+        editingGesture(false)
+        _geometry.update { it + (uri to snapshot.geometry) }
+        replaceToneAndMasks(uri, snapshot)
+        publishEditHistory()
+    }
+
     /** Drafts are rendered in memory; only the editor's Done action writes them to disk. */
     fun beginEditing(uri: String): Job? {
         if (_editBusy.value || editBaseline != null) return null
@@ -198,6 +223,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 loadEdits(uri)?.join()
                 pendingSaves[uri]?.join()
                 editSaveMutex.withLock {
+                    clearEditHistory()
                     editBaseline = uri to editSnapshot(uri)
                     photos.value.indexOfFirst { it.uri == uri }.takeIf { it >= 0 }?.let { selectedIndex.value = it }
                     _editingUri.value = uri
@@ -227,6 +253,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 }
                 photos.value.indexOfFirst { it.uri == uri }.takeIf { it >= 0 }?.let { selectedIndex.value = it }
                 editBaseline = null
+                clearEditHistory()
                 _editingUri.value = null
             } catch (error: Exception) {
                 toast.value = "编辑保存失败：${error.message}"
@@ -259,17 +286,34 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         toast.value = "已复位全部调色及蒙版"
     }
 
+    fun resetEditorEdits() {
+        val uri = editBaseline?.first ?: return
+        if (_editBusy.value || editSnapshot(uri) == PhotoEdits()) return
+        recordEdit(uri)
+        _geometry.update { it + (uri to PhotoGeometry()) }
+        replaceToneAndMasks(uri, PhotoEdits())
+    }
+
     private fun applyEdits(uri: String, edits: PhotoEdits) {
+        if (_editBusy.value) return
+        val previous = editSnapshot(uri)
+        if (previous.tone == edits.tone && previous.masks == edits.masks) return
+        recordEdit(uri)
+        replaceToneAndMasks(uri, edits)
+        saveEdits(uri)
+    }
+
+    private fun replaceToneAndMasks(uri: String, edits: PhotoEdits) {
         _toneParams.update { it + (uri to edits.tone) }
         _masks.update { it + (uri to edits.masks) }
         if (toneFull.value?.first == uri) toneFull.value = null
         if (tonePreview.value?.first == uri) tonePreview.value = null
         renderTonePreview(uri)
-        saveEdits(uri)
     }
 
     fun setMasks(uri: String, layers: List<MaskLayer>) {
-        if (_editBusy.value) return
+        if (_editBusy.value || _masks.value[uri].orEmpty() == layers) return
+        recordEdit(uri)
         _masks.update { it + (uri to layers) }
         if (toneFull.value?.first == uri) toneFull.value = null
         renderTonePreview(uri)
@@ -277,7 +321,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun setGeometry(uri: String, geometry: PhotoGeometry) {
-        if (_editBusy.value) return
+        if (_editBusy.value || (_geometry.value[uri] ?: PhotoGeometry()) == geometry.normalized()) return
+        recordEdit(uri)
         _geometry.update { it + (uri to geometry.normalized()) }
         saveEdits(uri)
     }
@@ -428,11 +473,16 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun onMediaPermissionResult(granted: Boolean) {
         _hasMediaPermission.value = granted
-        if (granted) { registerMediaObserver(); rescan() }
+        if (granted) {
+            selectGallerySource("local")
+            registerMediaObserver()
+            rescan()
+        }
     }
 
     fun onTreeGranted(uri: Uri) {
         SafManager.persist(getApplication(), uri)
+        selectGallerySource("external")
         _treeUri.value = uri
         observeExternal()
         refreshDriveState()
@@ -514,7 +564,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     /** 更新某张照片的调色参数（全尺寸定稿随之失效，待重新渲染）。 */
     fun setTone(uri: String, params: ToneParams) {
-        if (_editBusy.value) return
+        if (_editBusy.value || (_toneParams.value[uri] ?: ToneParams()) == params) return
+        recordEdit(uri)
         _toneParams.update { it + (uri to params) }
         if (toneFull.value?.first == uri) toneFull.value = null
         renderTonePreview(uri)
@@ -718,6 +769,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                                     photo.sizeBytes, photo.lastModified).cacheKey).delete()
                                 DecodedCache.fileFor(photo.uri).delete()
                                 editStore.delete(photo.uri)
+                            }
+                            runCatching {
+                                GalleryThumbnail.removeFrom(getApplication<GalleryApp>().galleryThumbnails, photo)
                             }
                         }
                     }

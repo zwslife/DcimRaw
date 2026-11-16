@@ -9,8 +9,11 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -28,22 +31,20 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.Button
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -61,6 +62,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.zIndex
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.TransformOrigin
@@ -159,7 +161,7 @@ fun PhotoPagerScreen(
     var uiVisible by rememberSaveable { mutableStateOf(true) }
     val context = LocalContext.current
     val viewerPreferences = remember(context) { context.getSharedPreferences("photo-viewer", Context.MODE_PRIVATE) }
-    var showHistogram by rememberSaveable { mutableStateOf(viewerPreferences.getBoolean("histogram-visible", true)) }
+    var showHistogram by rememberSaveable { mutableStateOf(viewerPreferences.getBoolean("histogram-visible", false)) }
     fun toggleHistogram() {
         showHistogram = !showHistogram
         viewerPreferences.edit().putBoolean("histogram-visible", showHistogram).apply()
@@ -174,7 +176,6 @@ fun PhotoPagerScreen(
             value = current?.let { PhotoFormatProbe.read(context, it.uri, it.sizeBytes, it.lastModified) } ?: PhotoFileType.UNKNOWN
         }
     }
-    var comparingOriginal by remember(current?.uri) { mutableStateOf(false) }
     LaunchedEffect(currentFileType) {
         if (currentFileType != PhotoFileType.CR3) exportEmbedded = false
     }
@@ -198,7 +199,7 @@ fun PhotoPagerScreen(
     // Use the same edited frame as the photo, excluding the colored mask overlay.
     val histogramSource = current?.let { photo ->
         val decoded = decodedMap[photo.uri]
-        (if (hasCurrentEdits && !comparingOriginal) toneFull?.takeIf { it.first == photo.uri }?.second
+        (if (hasCurrentEdits) toneFull?.takeIf { it.first == photo.uri }?.second
             ?: tonePreview?.takeIf { it.first == photo.uri }?.second ?: decoded else decoded)
             ?: fallbackBitmaps[photo.uri]
     }
@@ -262,10 +263,11 @@ fun PhotoPagerScreen(
             ) { page ->
                 val photo = photos[page]
                 val isCurrent = page == pagerState.currentPage
-                val isExternalPhoto = photo.source == "external"
-                val previewRequest = remember(photo.uri, photo.sizeBytes, photo.lastModified, isExternalPhoto, context) {
+                val isCr3 = photo.displayName.endsWith(".cr3", ignoreCase = true) ||
+                    (isCurrent && currentFileType == PhotoFileType.CR3)
+                val previewRequest = remember(photo.uri, photo.sizeBytes, photo.lastModified, isCr3, context) {
                     ImageRequest.Builder(context)
-                        .data(if (isExternalPhoto) Cr3Image(Uri.parse(photo.uri), photo.sizeBytes, photo.lastModified) else Uri.parse(photo.uri))
+                        .data(if (isCr3) Cr3Image(Uri.parse(photo.uri), photo.sizeBytes, photo.lastModified) else Uri.parse(photo.uri))
                         .allowHardware(false)
                         .build()
                 }
@@ -307,7 +309,6 @@ fun PhotoPagerScreen(
                     val prevBmp = tonePreview?.takeIf { it.first == photo.uri }?.second
                     val hasLocalTone = masks[photo.uri].orEmpty().any { it.enabled && !it.tone.isNeutral }
                     val displayBitmap = when {
-                        isCurrent && comparingOriginal -> decoded
                         tone.isNeutral && !hasLocalTone -> decoded
                         else -> fullBmp ?: prevBmp ?: decoded
                     }
@@ -334,8 +335,8 @@ fun PhotoPagerScreen(
             // 顶栏：圆形返回 + 标题 + 圆形信息（单击图片渐隐渐出）
             AnimatedVisibility(
                 visible = uiVisible,
-                enter = fadeIn(),
-                exit = fadeOut(),
+                enter = fadeIn(tween(180)) + slideInVertically(tween(200)) { -it / 5 },
+                exit = fadeOut(tween(140)) + slideOutVertically(tween(170)) { -it / 5 },
                 modifier = Modifier.align(Alignment.TopCenter),
             ) {
                 Row(
@@ -357,8 +358,15 @@ fun PhotoPagerScreen(
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
+                        val dimensions = current?.uri?.let(decodedMap::get)?.let {
+                            val (width, height) = currentGeometry.outputSize(it.width, it.height)
+                            "$width × $height"
+                        }
                         Text(
-                            text = "${if (currentFileType == PhotoFileType.CR3) "RAW · " else ""}${pagerState.currentPage + 1} / ${photos.size}",
+                            text = buildString {
+                                if (currentFileType == PhotoFileType.CR3) append("RAW · ")
+                                append(dimensions ?: "${pagerState.currentPage + 1} / ${photos.size}")
+                            },
                             style = MaterialTheme.typography.bodySmall,
                             color = StudioColors.Muted,
                         )
@@ -370,14 +378,12 @@ fun PhotoPagerScreen(
                     CompositionLocalProvider(LocalViewConfiguration provides compactConfig) {
                         HistogramIconButton(shown = showHistogram, onClick = ::toggleHistogram, modifier = Modifier.size(32.dp))
                         Spacer(Modifier.width(4.dp))
-                        StudioIconButton(StudioSymbol.Info, "信息", {
-                            showInfo = !showInfo
-
-                        }, modifier = Modifier.size(32.dp), selected = showInfo)
+                        StudioIconButton(StudioSymbol.Info, "信息", { showInfo = !showInfo }, modifier = Modifier.size(32.dp), selected = showInfo)
                     }
                     Box {
                         StudioIconButton(StudioSymbol.Ellipsis, "更多", { showMore = true })
-                        DropdownMenu(showMore, { showMore = false }) {
+                        DropdownMenu(showMore, { showMore = false }, containerColor = Color.White,
+                            shape = RoundedCornerShape(18.dp)) {
                             if (canEdit) {
                                 DropdownMenuItem(text = { Text("复制调色参数") }, leadingIcon = { StudioIcon(StudioSymbol.Copy) },
                                     onClick = { current?.let { onCopyEdits(it.uri) }; showMore = false })
@@ -399,43 +405,28 @@ fun PhotoPagerScreen(
             // Geometry shares the photo's non-destructive editing and export flow.
             AnimatedVisibility(
                 visible = uiVisible && canEdit && !showInfo,
-                enter = fadeIn(),
-                exit = fadeOut(),
+                enter = fadeIn(tween(180)) + slideInVertically(tween(200)) { it / 3 },
+                exit = fadeOut(tween(140)) + slideOutVertically(tween(170)) { it / 3 },
                 modifier = Modifier.align(Alignment.BottomCenter),
             ) {
                 Column(Modifier.fillMaxWidth().onSizeChanged { dockHeight = it.height }
-                    .background(Color.White).navigationBarsPadding().padding(horizontal = 16.dp, vertical = 8.dp),
+                    .navigationBarsPadding().padding(horizontal = 20.dp, vertical = 8.dp),
                     horizontalAlignment = Alignment.CenterHorizontally) {
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly,
+                    Row(Modifier.width(176.dp).shadow(3.dp, CircleShape, clip = true)
+                        .background(Color.White, CircleShape).border(1.dp, StudioColors.Line, CircleShape)
+                        .padding(horizontal = 7.dp, vertical = 3.dp),
                         verticalAlignment = Alignment.CenterVertically) {
-                        StudioTool(StudioSymbol.Pencil, "编辑", { current?.let { onBeginEditing(it.uri) } },
-                            enabled = curDecodedReady && !deleting && !exporting && !editBusy)
-                        StudioTool(StudioSymbol.Trash2, if (deleting) "删除中…" else "删除",
-                            { current?.let(onDelete) },
+                        StudioTool(StudioSymbol.Settings, "编辑", { current?.let { onBeginEditing(it.uri) } },
+                            modifier = Modifier.weight(1f),
+                            enabled = curDecodedReady && !deleting && !exporting && !editBusy, tint = StudioColors.Accent)
+                        StudioTool(StudioSymbol.Share, "导出",
+                            { showExport = true }, modifier = Modifier.weight(1f),
+                            enabled = current != null && !exporting && !deleting, tint = StudioColors.Accent)
+                        StudioTool(StudioSymbol.Trash2, "删除",
+                            { current?.let(onDelete) }, modifier = Modifier.weight(1f),
                             enabled = current != null && !deleting && !exporting, tint = DeleteRed)
-                        StudioTool(StudioSymbol.ArrowUpFromLine, if (exporting) "导出中…" else "导出",
-                            { showExport = true }, enabled = current != null && !exporting && !deleting)
                     }
                 }
-            }
-        }
-
-        if (curDecodedReady && !showInfo && uiVisible) {
-            val bottom = with(LocalDensity.current) {
-                dockHeight.toDp()
-            }
-            DisposableEffect(current?.uri) { onDispose { comparingOriginal = false } }
-            Box(Modifier.align(Alignment.BottomEnd).padding(end = 12.dp, bottom = bottom + 12.dp)
-                .size(36.dp).clip(RoundedCornerShape(10.dp))
-                .background(Color.White.copy(alpha = .8f))
-                .semantics { contentDescription = "长按对比未调色原图"; stateDescription = if (comparingOriginal) "原图" else "调色后" }
-                .pointerInput(current?.uri) {
-                    detectTapGestures(onPress = {
-                        comparingOriginal = true
-                        try { tryAwaitRelease() } finally { comparingOriginal = false }
-                    })
-                }, contentAlignment = Alignment.Center) {
-                StudioIcon(StudioSymbol.Contrast, Modifier.size(20.dp), tint = StudioColors.Ink)
             }
         }
 
@@ -468,6 +459,7 @@ fun PhotoPagerScreen(
             ) {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Text("照片信息", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
+                    HistogramIconButton(showHistogram, ::toggleHistogram)
                     StudioIconButton(StudioSymbol.X, "关闭信息", { showInfo = false })
                 }
                 Text(current.displayName, style = MaterialTheme.typography.titleSmall, color = StudioColors.Ink)
@@ -503,27 +495,32 @@ fun PhotoPagerScreen(
         }
 
         if (showExport && current != null) {
-            AlertDialog(onDismissRequest = { showExport = false }, containerColor = Color.White,
-                icon = { StudioIcon(StudioSymbol.ArrowUpFromLine, tint = StudioColors.Pine) },
-                title = { Text("导出照片") },
-                text = {
-                    Column {
-                        Text(current.displayName, style = MaterialTheme.typography.titleSmall)
-                        Spacer(Modifier.height(20.dp))
-                        StudioChoice("调色后 JPEG", { exportEmbedded = false }, symbol = StudioSymbol.Palette, selected = !exportEmbedded)
-                        if (currentFileType == PhotoFileType.CR3) StudioChoice("RAW 内嵌 JPEG", { exportEmbedded = true }, symbol = StudioSymbol.Images, selected = exportEmbedded)
-                        Spacer(Modifier.height(12.dp))
-                        ExifRow("格式", "JPEG")
-                        val size = decodedMap[current.uri]?.let { currentGeometry.outputSize(it.width, it.height) }
-                        ExifRow("尺寸", if (exportEmbedded) "机内预览尺寸" else size?.let { "${it.first} × ${it.second}" } ?: "原始尺寸")
-                        ExifRow("调整", if (exportEmbedded) "不应用编辑" else "调色、蒙版、裁切与旋转")
-                    }
-                },
-                confirmButton = { Button(onClick = {
+            StudioBottomSheet({ showExport = false }) {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text("导出照片", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
+                    StudioIconButton(StudioSymbol.X, "关闭导出", { showExport = false })
+                }
+                Text(current.displayName, style = MaterialTheme.typography.bodySmall, color = StudioColors.Muted,
+                    maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Spacer(Modifier.height(12.dp))
+                StudioChoice("编辑后 JPEG", { exportEmbedded = false }, Modifier.fillMaxWidth(),
+                    symbol = StudioSymbol.Palette, selected = !exportEmbedded)
+                if (currentFileType == PhotoFileType.CR3) {
+                    StudioChoice("相机内嵌 JPEG", { exportEmbedded = true }, Modifier.fillMaxWidth(),
+                        symbol = StudioSymbol.Images, selected = exportEmbedded)
+                }
+                val size = decodedMap[current.uri]?.let { currentGeometry.outputSize(it.width, it.height) }
+                val dimensions = if (exportEmbedded) "机内预览尺寸"
+                    else size?.let { (w, h) -> "${w} × ${h}" } ?: "原始尺寸"
+                ExifRow("输出", "JPEG · $dimensions")
+                if (exportEmbedded) Text("不应用编辑", style = MaterialTheme.typography.bodySmall,
+                    color = StudioColors.Muted)
+                Spacer(Modifier.height(12.dp))
+                StudioPillButton("保存到相册", {
                     showExport = false
                     if (exportEmbedded && currentFileType == PhotoFileType.CR3) onExportEmbedded(current) else onExport(current)
-                }, enabled = !exporting) { Text("导出到相册") } },
-                dismissButton = { TextButton(onClick = { showExport = false }) { Text("取消") } })
+                }, Modifier.fillMaxWidth(), enabled = !exporting, filled = true)
+            }
         }
 
 

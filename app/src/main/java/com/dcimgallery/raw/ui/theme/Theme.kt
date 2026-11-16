@@ -4,17 +4,18 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
+import com.dcimgallery.raw.ui.StudioColors
 
 private val LightColors = lightColorScheme(
-    primary = Color(0xFF28745C),
+    primary = StudioColors.Accent,
     onPrimary = Color.White,
-    secondary = Color(0xFF28745C),
-    background = Color(0xFFF1F4EF),
-    onBackground = Color(0xFF202923),
+    secondary = StudioColors.Accent,
+    background = StudioColors.Canvas,
+    onBackground = StudioColors.Ink,
     surface = Color.White,
-    onSurface = Color(0xFF202923),
-    surfaceVariant = Color(0xFFE8F1EB),
-    onSurfaceVariant = Color(0xFF68736B),
+    onSurface = StudioColors.Ink,
+    surfaceVariant = StudioColors.Tint,
+    onSurfaceVariant = StudioColors.Muted,
     surfaceTint = Color.Transparent,
     surfaceContainer = Color.White,
     surfaceContainerHigh = Color.White,

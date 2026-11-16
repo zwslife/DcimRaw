@@ -22,6 +22,7 @@ object PhotoFormatProbe {
     }
     private val reads = Semaphore(4)
     private fun cached(key: Key): PhotoFileType? = synchronized(cache) { cache[key] }
+    fun cached(uri: String, size: Long, modified: Long): PhotoFileType? = cached(Key(uri, size, modified))
     private fun remember(key: Key, type: PhotoFileType) = synchronized(cache) { cache[key] = type }
     private fun PhotoFormatEntity.match(key: Key): PhotoFileType? =
         if (sizeBytes == key.size && lastModified == key.modified)

@@ -63,7 +63,7 @@ private fun PrivacyPolicyScreen(requestingConsent: Boolean, onClose: () -> Unit,
         Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(20.dp)) {
             if (!BuildConfig.PRIVACY_POLICY_READY) Text(
                 "政策尚未定稿，仅供开发者检查，不能用于商店送审。",
-                color = StudioColors.Pine, style = MaterialTheme.typography.bodyMedium,
+                color = StudioColors.Accent, style = MaterialTheme.typography.bodyMedium,
                 modifier = Modifier.padding(bottom = 16.dp),
             )
             Text(text, color = StudioColors.Ink, style = MaterialTheme.typography.bodyMedium)
@@ -80,7 +80,7 @@ private fun PrivacyPolicyScreen(requestingConsent: Boolean, onClose: () -> Unit,
 @Composable
 private fun PolicyAction(label: String, onClick: () -> Unit, modifier: Modifier, primary: Boolean) {
     Box(modifier.heightIn(min = 44.dp).clip(RoundedCornerShape(12.dp))
-        .background(if (primary) StudioColors.Pine else StudioColors.Tint).clickable(onClick = onClick)
+        .background(if (primary) StudioColors.Accent else StudioColors.Tint).clickable(onClick = onClick)
         .padding(horizontal = 12.dp, vertical = 12.dp), contentAlignment = Alignment.Center) {
         Text(label, color = if (primary) Color.White else StudioColors.Ink, style = MaterialTheme.typography.labelLarge)
     }

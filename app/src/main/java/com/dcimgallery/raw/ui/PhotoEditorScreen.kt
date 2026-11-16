@@ -3,23 +3,21 @@ package com.dcimgallery.raw.ui
 import android.graphics.Bitmap
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.dcimgallery.raw.core.geometry.PhotoGeometry
@@ -32,9 +30,26 @@ internal fun PhotoEditorScreen(photo: PhotoEntity, decoded: Bitmap, frame: Bitma
     tone: ToneParams, layers: List<MaskLayer>, geometry: PhotoGeometry, busy: Boolean,
     onTone: (ToneParams) -> Unit, onMasks: (List<MaskLayer>) -> Unit,
     onGeometry: (PhotoGeometry) -> Unit, onFinish: (Boolean) -> Unit,
-    onEnsureEngine: () -> Unit, onRenderFull: () -> Unit) {
+    onEnsureEngine: () -> Unit, onRenderFull: () -> Unit,
+    canUndo: Boolean, canRedo: Boolean, onHistory: (Boolean) -> Unit,
+    onGesture: (Boolean) -> Unit, canPaste: Boolean, onCopy: () -> Unit,
+    onPaste: () -> Unit, onReset: () -> Unit) {
     var tool by rememberSaveable(photo.uri) { mutableIntStateOf(0) }
-    var curveSection by remember { mutableStateOf(false) }
+    var section by rememberSaveable(photo.uri) { mutableIntStateOf(0) }
+    var more by remember { mutableStateOf(false) }
+    var comparing by remember(photo.uri, tool) { mutableStateOf(false) }
+    fun pick(entry: EditTool) {
+        when (entry) {
+            MaskToolEntry -> tool = 1
+            CropToolEntry -> tool = 2
+            AdaptiveLookToolEntry -> tool = 3
+            PortraitToolEntry -> tool = 4
+            else -> {
+                section = ToneTools.indexOf(entry)
+                tool = 0
+            }
+        }
+    }
     val gesture = remember { PagerGestureState() }
     val scope = rememberCoroutineScope()
     LaunchedEffect(Unit) { gesture.attach(scope); onEnsureEngine() }
@@ -45,7 +60,6 @@ internal fun PhotoEditorScreen(photo: PhotoEntity, decoded: Bitmap, frame: Bitma
         if (layers.none { it.id == selectedId }) selectedId = layers.lastOrNull()?.id
     }
     var maskTool by remember { mutableStateOf(MaskTool.BRUSH) }
-    var subtract by remember { mutableStateOf(false) }
     var radius by remember { mutableFloatStateOf(.06f) }
     var feather by remember { mutableFloatStateOf(.7f) }
     var opacity by remember { mutableFloatStateOf(1f) }
@@ -57,23 +71,34 @@ internal fun PhotoEditorScreen(photo: PhotoEntity, decoded: Bitmap, frame: Bitma
         Row(Modifier.fillMaxWidth().height(56.dp).background(Color.White).padding(horizontal = 8.dp),
             verticalAlignment = Alignment.CenterVertically) {
             StudioIconButton(StudioSymbol.X, "撤销本次编辑并退出", { onFinish(false) }, enabled = !busy)
-            Column(Modifier.weight(1f).padding(horizontal = 8.dp)) {
-                Text(photo.displayName, color = StudioColors.Ink, maxLines = 1,
-                    overflow = TextOverflow.Ellipsis, fontSize = 13.sp)
+            Box(Modifier.weight(1f).padding(horizontal = 8.dp)) {
                 if (tool == 2) {
                     val (w, h) = geometry.outputSize(decoded.width, decoded.height)
-                    Text("${w} × ${h}", color = StudioColors.Muted, fontSize = 11.sp)
+                    Text("${w} × ${h}", color = StudioColors.Muted, fontSize = 12.sp, maxLines = 1)
                 }
             }
-            Text(if (busy) "保存中…" else "完成", color = Color.White, fontSize = 14.sp,
-                modifier = Modifier.clip(RoundedCornerShape(22.dp)).background(StudioColors.Pine)
-                    .clickable(enabled = !busy) { onRenderFull(); onFinish(true) }
-                    .padding(horizontal = 20.dp, vertical = 11.dp))
+            StudioIconButton(StudioSymbol.Undo2, "撤回上一步", { onHistory(false) }, enabled = canUndo && !busy)
+            StudioIconButton(StudioSymbol.Redo2, "重做上一步", { onHistory(true) }, enabled = canRedo && !busy)
+            Box {
+                StudioIconButton(StudioSymbol.Ellipsis, "编辑操作", { more = true }, enabled = !busy)
+                DropdownMenu(more, { more = false }, containerColor = Color.White, shape = RoundedCornerShape(18.dp)) {
+                    StudioChoice("复制调色参数", { more = false; onCopy() }, symbol = StudioSymbol.Copy)
+                    if (canPaste) StudioChoice("粘贴调色参数", { more = false; onPaste() }, symbol = StudioSymbol.Paste)
+                    StudioChoice("复位本次全部调整", { more = false; onReset() }, symbol = StudioSymbol.RotateCcw)
+                }
+            }
+            StudioIconButton(StudioSymbol.Check, "完成", { onRenderFull(); onFinish(true) }, filled = true, enabled = !busy)
         }
         BoxWithConstraints(Modifier.fillMaxWidth().weight(1f)) {
-            val panelHeight = maxHeight * if (tool == 0 && curveSection) .65f else .5f
+            val curve = tool == 0 && section == 6
+            val ratio = when {
+                curve -> .56f
+                tool == 1 -> .46f
+                else -> .40f
+            }
+            val panelHeight = maxOf(maxHeight * ratio, minOf(152.dp, maxHeight * .58f))
             if (tool == 2) CropEditorContent(photo.uri, frame, geometry, onGeometry,
-                sourceWidth = decoded.width, sourceHeight = decoded.height)
+                sourceWidth = decoded.width, sourceHeight = decoded.height, onPick = ::pick, onGesture = onGesture)
             else Column(Modifier.fillMaxSize()) {
                 Box(Modifier.fillMaxWidth().weight(1f).padding(12.dp)
                     .onSizeChanged { gesture.viewSize = it }.clipToBounds()
@@ -86,8 +111,8 @@ internal fun PhotoEditorScreen(photo: PhotoEntity, decoded: Bitmap, frame: Bitma
                         scaleX = gesture.scale; scaleY = gesture.scale
                         translationX = gesture.offset.x; translationY = gesture.offset.y
                     }) {
-                        PhotoGeometryViewport(frame, geometry, photo.displayName, Modifier.fillMaxSize()) {
-                            if (tool == 1) MaskOverlay(selected, component, maskTool, subtract,
+                        PhotoGeometryViewport(if (comparing) decoded else frame, geometry, photo.displayName, Modifier.fillMaxSize()) {
+                            if (tool == 1 && !comparing) MaskOverlay(selected, component, maskTool, false,
                                 radius, feather, opacity, overlay, decoded.width, decoded.height,
                                 editable = !adjusting && !busy, onCommit = { index, part ->
                                     selected?.let { layer ->
@@ -103,24 +128,26 @@ internal fun PhotoEditorScreen(photo: PhotoEntity, decoded: Bitmap, frame: Bitma
                                 }, modifier = Modifier.fillMaxSize())
                         }
                     }
+                    CompareButton(photo.uri, comparing, { comparing = it },
+                        Modifier.align(Alignment.BottomEnd))
                 }
                 Box(Modifier.fillMaxWidth().height(panelHeight)) {
-                    if (tool == 0) TonePanel(photo.uri, tone, onTone, {}, {}, compactHeader = true,
-                        onCurveSection = { curveSection = it })
-                    else MaskPanel(layers, selectedId, { selectedId = it; component = -1 }, onMasks,
-                        maskTool, { maskTool = it }, subtract, { subtract = it }, radius, { radius = it },
-                        feather, { feather = it }, opacity, { opacity = it }, component, { component = it },
-                        adjusting, { adjusting = it }, {}, overlay, { overlay = it }, {},
-                        thumbnail = frame, embedded = true)
+                    when (tool) {
+                        3 -> AdaptiveLookPanel(decoded, geometry, tone, busy, onTone, ::pick)
+                        4 -> PortraitLightPanel(frame, geometry, layers, busy, onApply = {
+                            selectedId = it.last().id
+                            component = -1
+                            onMasks(it)
+                        }, onPick = ::pick)
+                        1 -> MaskPanel(layers, selectedId, { selectedId = it; component = -1 }, onMasks,
+                            maskTool, { maskTool = it }, radius, { radius = it },
+                            feather, { feather = it }, opacity, { opacity = it }, { component = it },
+                            { adjusting = it }, onGesture, { overlay = it },
+                            thumbnail = frame, onPick = ::pick)
+                        else -> TonePanel(photo.uri, section, tone, onTone, onGesture, ::pick)
+                    }
                 }
             }
-        }
-        Row(Modifier.fillMaxWidth().background(Color.White).padding(vertical = 6.dp),
-            horizontalArrangement = Arrangement.SpaceEvenly) {
-            listOf(StudioSymbol.Palette to "调色", StudioSymbol.Scan to "蒙版", StudioSymbol.Frame to "裁切旋转")
-                .forEachIndexed { index, (icon, title) ->
-                    StudioTool(icon, title, { tool = index }, selected = tool == index, enabled = !busy)
-                }
         }
     }
 }

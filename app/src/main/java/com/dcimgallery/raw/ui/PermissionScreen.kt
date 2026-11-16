@@ -28,7 +28,7 @@ fun PermissionScreen(
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        StudioIcon(StudioSymbol.Images, modifier = Modifier.padding(bottom = 24.dp), tint = StudioColors.Pine)
+        StudioIcon(StudioSymbol.Images, modifier = Modifier.padding(bottom = 24.dp), tint = StudioColors.Accent)
         Text("照片图库", style = MaterialTheme.typography.headlineMedium)
         Spacer(Modifier.height(20.dp))
         Text(

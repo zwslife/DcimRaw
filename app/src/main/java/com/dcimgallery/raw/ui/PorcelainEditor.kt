@@ -2,16 +2,15 @@ package com.dcimgallery.raw.ui
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.ui.draw.rotate
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -23,93 +22,121 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.semantics.*
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.sp
 import com.dcimgallery.raw.core.tone.ToneParams
 import kotlin.math.abs
+import kotlin.math.floor
 
-internal val EditorPine = Color(0xFF28644D)
-private val EditorMuted = Color(0xFF859087)
+internal val EditorAccent = StudioColors.Accent
+private val EditorMuted = StudioColors.Muted
+
+internal data class EditTool(val label: String, val symbol: StudioSymbol)
+
+internal val ToneTools = listOf(
+    EditTool("光线", StudioSymbol.Sun), EditTool("色彩", StudioSymbol.Palette),
+    EditTool("混色", StudioSymbol.CircleDot), EditTool("效果", StudioSymbol.Sparkles),
+    EditTool("分级", StudioSymbol.Aperture), EditTool("细节", StudioSymbol.Focus),
+    EditTool("曲线", StudioSymbol.Curve),
+)
+internal val MaskToolEntry = EditTool("蒙版", StudioSymbol.Scan)
+internal val CropToolEntry = EditTool("旋转裁切", StudioSymbol.Frame)
+internal val AdaptiveLookToolEntry = EditTool("预设", StudioSymbol.Layers2)
+internal val PortraitToolEntry = EditTool("人像", StudioSymbol.Focus)
+private val ToolMenuOrder = listOf(0, 6, 1, 2, 3, 4, 5)
 
 @Composable
-internal fun PorcelainPanel(modifier: Modifier = Modifier, embedded: Boolean = false,
-    content: @Composable ColumnScope.() -> Unit) {
-    Column(modifier.fillMaxSize().clip(RoundedCornerShape(topStart = 26.dp, topEnd = 26.dp))
-        .background(Color.White).then(if (embedded) Modifier else Modifier.navigationBarsPadding())) {
-        Box(Modifier.fillMaxWidth().height(9.dp), contentAlignment = Alignment.BottomCenter) {
-            Box(Modifier.size(26.dp, 3.dp).clip(CircleShape).background(Color(0xFFDFE6DC)))
-        }
-        content()
-    }
+internal fun PorcelainPanel(content: @Composable ColumnScope.() -> Unit) {
+    Column(Modifier.fillMaxSize().clip(RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp))
+        .background(Color.White).padding(top = 8.dp), content = content)
 }
 
 @Composable
-internal fun PorcelainHeader(onUndo: () -> Unit, onDone: () -> Unit, canUndo: Boolean,
-    onRedo: () -> Unit, canRedo: Boolean, showDone: Boolean = true) {
-    Row(Modifier.fillMaxWidth().height(40.dp).padding(horizontal = 16.dp),
-        horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
-        EditorAction(StudioSymbol.Undo2, "撤回上一次调整", onUndo, enabled = canUndo)
-        EditorAction(StudioSymbol.Redo2, "重做上一次调整", onRedo, enabled = canRedo)
-        if (showDone) EditorAction(StudioSymbol.Check, "确认调整", onDone, filled = true)
+internal fun EditorToolPicker(tool: EditTool, onPick: (EditTool) -> Unit, maskOnly: Boolean = false,
+    modifier: Modifier = Modifier) {
+    var expanded by remember { mutableStateOf(false) }
+    val choices = ToolMenuOrder.filter { !maskOnly || it != 6 }.map(ToneTools::get) +
+        if (maskOnly) emptyList() else listOf(AdaptiveLookToolEntry, PortraitToolEntry, MaskToolEntry, CropToolEntry)
+    Box(modifier) {
+        Row(Modifier.height(44.dp).studioPressable { expanded = true }, verticalAlignment = Alignment.CenterVertically) {
+            Row(Modifier.height(32.dp).background(StudioColors.Tint, CircleShape).padding(horizontal = 8.dp),
+                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                StudioIcon(tool.symbol, Modifier.size(14.dp), tint = EditorAccent)
+                Text(tool.label, fontSize = 13.sp, maxLines = 1)
+                StudioIcon(StudioSymbol.ChevronRight, Modifier.size(12.dp).rotate(90f), tint = EditorMuted)
+            }
+        }
+        DropdownMenu(expanded, onDismissRequest = { expanded = false }, containerColor = Color.White,
+            shape = RoundedCornerShape(18.dp), modifier = Modifier.width(248.dp)) {
+            choices.chunked(2).forEach { pair ->
+                Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp)) {
+                    pair.forEach { entry ->
+                        StudioChoice(entry.label, {
+                            expanded = false
+                            onPick(entry)
+                        }, Modifier.weight(1f), symbol = entry.symbol, selected = entry == tool)
+                    }
+                    if (pair.size == 1) Spacer(Modifier.weight(1f))
+                }
+            }
+        }
     }
 }
 
 @Composable
 internal fun EditorAction(symbol: StudioSymbol, label: String, onClick: () -> Unit,
-    filled: Boolean = false, enabled: Boolean = true) {
-    Box(Modifier.size(40.dp).clip(RoundedCornerShape(10.dp)).clickable(enabled = enabled, onClick = onClick),
-        contentAlignment = Alignment.Center) {
-        Box(Modifier.size(27.dp).clip(RoundedCornerShape(9.dp))
-            .background(if (filled) EditorPine else Color.Transparent), contentAlignment = Alignment.Center) {
-            StudioIcon(symbol, Modifier.size(15.dp), label,
-                if (filled) Color.White else EditorMuted.copy(alpha = if (enabled) 1f else .4f))
-        }
+    enabled: Boolean = true, tint: Color = EditorMuted) {
+    Box(Modifier.size(44.dp).studioPressable(enabled, onClick = onClick), contentAlignment = Alignment.Center) {
+        StudioIcon(symbol, Modifier.size(18.dp), label, tint)
     }
 }
 
+private val GradeChoices = listOf(
+    Triple("阴影", StudioSymbol.Moon, StudioSymbol.MoonActive),
+    Triple("中间调", StudioSymbol.Contrast, StudioSymbol.ContrastActive),
+    Triple("高光", StudioSymbol.Sun, StudioSymbol.SunActive),
+    Triple("全局", StudioSymbol.Aperture, StudioSymbol.ApertureActive),
+)
+
 @Composable
-internal fun EditorTabs(selected: Int, onSelect: (Int) -> Unit, includeRange: Boolean = false,
-    includeCurves: Boolean = true) {
-    val labels = listOf("光线", "色彩", "混色", "效果", "分级", "细节", "曲线")
-    val icons = listOf(StudioSymbol.Sun, StudioSymbol.Palette, StudioSymbol.CircleDot,
-        StudioSymbol.Sparkles, StudioSymbol.Aperture, StudioSymbol.Focus, StudioSymbol.Curve)
-    val scroll = rememberScrollState()
-    Column {
-        Row(Modifier.fillMaxWidth().height(48.dp).horizontalScroll(scroll).padding(horizontal = 12.dp)) {
-            val indices = (if (includeRange) listOf(-1) else emptyList()) +
-                listOf(0) + (if (includeCurves) listOf(6) else emptyList()) + listOf(1, 2, 3, 4, 5)
-            indices.forEach { index ->
-                val active = index == selected
-                val tint = if (active) EditorPine else EditorMuted
-                Box(Modifier.height(48.dp).widthIn(min = 52.dp).clickable { onSelect(index) }
-                    .semantics { this.selected = active }, contentAlignment = Alignment.Center) {
-                    Row(Modifier.padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        StudioIcon(if (index == -1) StudioSymbol.Scan else icons[index], Modifier.size(15.dp), tint = tint)
-                        Text(if (index == -1) "范围" else labels[index], color = tint, fontSize = 12.sp)
-                    }
-                    if (active) Box(Modifier.align(Alignment.BottomCenter).padding(bottom = 4.dp)
-                        .size(18.dp, 2.dp).clip(CircleShape).background(EditorPine))
-                }
+internal fun GradeTabs(grade: Int, onSelect: (Int) -> Unit, modifier: Modifier = Modifier) {
+    Row(modifier.widthIn(max = 176.dp)) {
+        GradeChoices.forEachIndexed { index, (name, regular, active) ->
+            val selected = index == grade
+            Box(Modifier.weight(1f).height(44.dp).studioPressable(selected = selected) { onSelect(index) },
+                contentAlignment = Alignment.Center) {
+                StudioIcon(if (selected) active else regular, Modifier.size(19.dp), name,
+                    if (selected) EditorAccent else EditorMuted)
             }
         }
-        Box(Modifier.fillMaxWidth().height(1.dp).background(Color(0xFFE4E9E3)))
     }
 }
 
+private val EditorSwatches = listOf(0xFFF34444, 0xFFFF900A, 0xFFF4CF20, 0xFF47A84A,
+    0xFF00AEBE, 0xFF248CE3, 0xFF923CB1, 0xFFE42675).map { Color(it) }
+private val CurveSwatches = listOf(null, EditorSwatches[0], EditorSwatches[3], EditorSwatches[5])
+
 @Composable
-internal fun EditorColorTabs(selected: Int, onSelect: (Int) -> Unit) {
-    Row(Modifier.fillMaxWidth().height(76.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-        ToneParams.HSL_COLORS.forEachIndexed { index, color ->
-            Column(Modifier.weight(1f).fillMaxHeight().clip(RoundedCornerShape(8.dp)).clickable { onSelect(index) }
-                .semantics { this.selected = selected == index },
-                horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-                Box(Modifier.size(30.dp).then(if (selected == index) Modifier.border(1.5.dp, EditorPine, CircleShape) else Modifier),
-                    contentAlignment = Alignment.Center) {
-                    Box(Modifier.size(20.dp).clip(CircleShape).background(Color(color)))
+internal fun EditorColorTabs(selected: Int, onSelect: (Int) -> Unit, modifier: Modifier = Modifier,
+    curves: Boolean = false) {
+    val names = if (curves) listOf("RGB", "红色", "绿色", "蓝色") else ToneParams.HSL_NAMES
+    val colors = if (curves) CurveSwatches else EditorSwatches
+    Row(modifier) {
+        names.forEachIndexed { index, name ->
+            val active = selected == index
+            val color = colors[index]
+            Box(Modifier.weight(1f).height(44.dp).studioPressable(selected = active) { onSelect(index) }
+                .semantics { contentDescription = name }, contentAlignment = Alignment.Center) {
+                Canvas(Modifier.size(16.dp)) {
+                    if (color != null) drawCircle(color)
+                    else listOf(EditorSwatches[0], EditorSwatches[3], EditorSwatches[5]).forEachIndexed { i, ink ->
+                        drawArc(ink, -150f + i * 120f, 120f, useCenter = true)
+                    }
                 }
-                Spacer(Modifier.height(5.dp))
-                Text(ToneParams.HSL_NAMES[index], fontSize = 11.sp, color = if (selected == index) EditorPine else EditorMuted)
+                if (active) {
+                    StudioIcon(StudioSymbol.Check, Modifier.offset(y = 0.7.dp).size(12.dp),
+                        tint = Color.Black.copy(alpha = .35f))
+                    StudioIcon(StudioSymbol.Check, Modifier.size(11.dp), tint = Color.White)
+                }
             }
         }
     }
@@ -119,20 +146,19 @@ internal fun EditorColorTabs(selected: Int, onSelect: (Int) -> Unit) {
 @Composable
 internal fun ParameterSlider(label: String, display: String, value: Float, range: ClosedFloatingPointRange<Float>,
     default: Float, controlKey: String, onChange: (Float) -> Unit, onGesture: (Boolean) -> Unit = {},
-    labelWidth: Dp = 80.dp) {
+    ruler: Boolean = false) {
     val current by rememberUpdatedState(value)
     val change by rememberUpdatedState(onChange)
     val gesture by rememberUpdatedState(onGesture)
     DisposableEffect(controlKey) { onDispose { gesture(false) } }
-    Row(Modifier.fillMaxWidth().height(48.dp), verticalAlignment = Alignment.CenterVertically) {
-        Row(Modifier.width(labelWidth), verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text(label, color = Color(0xFF6C7A6E), fontSize = 12.sp, modifier = Modifier.widthIn(max = 64.dp).weight(1f, fill = false))
-            Text(display, color = if (abs(value - default) > .0001f) EditorPine else EditorMuted,
-                fontSize = 11.sp, fontFamily = FontFamily.Monospace, maxLines = 1)
+    Column(Modifier.fillMaxWidth().height(56.dp)) {
+        Row(Modifier.fillMaxWidth().height(24.dp), verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = if (ruler) Arrangement.Center else Arrangement.SpaceBetween) {
+            if (!ruler) Text(label, color = StudioColors.Ink, fontSize = 13.sp, maxLines = 1)
+            Text(display, color = if (abs(value - default) > .0001f) EditorAccent else EditorMuted,
+                fontSize = 12.sp, fontFamily = FontFamily.Monospace, maxLines = 1)
         }
-        Spacer(Modifier.width(2.dp))
-        Canvas(Modifier.weight(1f).height(46.dp)
+        Canvas(Modifier.fillMaxWidth().weight(1f)
             .semantics {
                 contentDescription = label
                 stateDescription = display
@@ -158,11 +184,23 @@ internal fun ParameterSlider(label: String, display: String, value: Float, range
             val y = size.height / 2
             val origin = x(if (range.start < 0f && range.endInclusive > 0f) 0f else range.start)
             val thumb = x(current.coerceIn(range))
-            drawLine(Color(0xFFE9ECE8), Offset(inset, y), Offset(size.width - inset, y), 4.dp.toPx(), StrokeCap.Round)
-            drawLine(Color(0xFF4C8166), Offset(origin, y), Offset(thumb, y), 4.dp.toPx(), StrokeCap.Round)
-            drawLine(Color(0xFFA3AEA3), Offset(origin, y - 4.dp.toPx()), Offset(origin, y + 4.dp.toPx()), 1.dp.toPx())
-            for (i in 4 downTo 1) drawCircle(Color(0xFF24382E).copy(alpha = .014f), (10 + i).dp.toPx(), Offset(thumb, y + 2.dp.toPx()))
-            drawCircle(Color(0xFFE9EDE8), 10.5.dp.toPx(), Offset(thumb, y))
+            if (ruler) {
+                val spacing = 8.dp.toPx()
+                val center = size.width / 2
+                val ticks = floor(span / (2 * spacing)).toInt()
+                val shift = (current / 2f) * spacing
+                for (index in -ticks..ticks) {
+                    val x = center + index * spacing - shift % spacing
+                    drawLine(StudioColors.Track, Offset(x, y - 5.dp.toPx()), Offset(x, y + 5.dp.toPx()), 1.dp.toPx())
+                }
+                drawLine(StudioColors.Accent, Offset(center, y - 10.dp.toPx()), Offset(center, y + 10.dp.toPx()), 1.5.dp.toPx())
+                return@Canvas
+            }
+            drawLine(StudioColors.Track, Offset(inset, y), Offset(size.width - inset, y), 4.dp.toPx(), StrokeCap.Round)
+            drawLine(StudioColors.Accent, Offset(origin, y), Offset(thumb, y), 4.dp.toPx(), StrokeCap.Round)
+            drawLine(StudioColors.Muted.copy(alpha = .6f), Offset(origin, y - 4.dp.toPx()), Offset(origin, y + 4.dp.toPx()), 1.dp.toPx())
+            for (i in 4 downTo 1) drawCircle(Color.Black.copy(alpha = .022f), (10 + i).dp.toPx(), Offset(thumb, y + 2.dp.toPx()))
+            drawCircle(StudioColors.Line, 10.5.dp.toPx(), Offset(thumb, y))
             drawCircle(Color.White, 10.dp.toPx(), Offset(thumb, y))
         }
     }

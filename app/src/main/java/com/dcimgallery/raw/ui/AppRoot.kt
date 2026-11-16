@@ -31,7 +31,10 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.dcimgallery.raw.MainViewModel
+import com.dcimgallery.raw.core.exif.ExifInfo
 import com.dcimgallery.raw.core.exif.ExifReader
+import com.dcimgallery.raw.core.raw.PhotoFormatProbe
+import com.dcimgallery.raw.core.raw.PhotoFileType
 import androidx.core.content.ContextCompat
 import android.content.pm.PackageManager
 import com.dcimgallery.raw.data.db.PhotoEntity
@@ -128,10 +131,10 @@ fun AppRoot(viewModel: MainViewModel = viewModel()) {
     }
     val treeUri by viewModel.treeUri.collectAsState()
     val photos by viewModel.photos.collectAsState()
-    val showCr3Only by viewModel.showCr3Only.collectAsState()
+    val gallerySource by viewModel.gallerySource.collectAsState()
+    val editHistory by viewModel.editHistory.collectAsState()
     val gridItems by viewModel.gridItems.collectAsState()
     val scanning by viewModel.scanning.collectAsState()
-    val scanFound by viewModel.scanFound.collectAsState()
     val driveReadable by viewModel.driveReadable.collectAsState()
     val selected by viewModel.selectedIndex.collectAsState()
     val decodedMap by viewModel.decodedMap.collectAsState()
@@ -197,6 +200,11 @@ fun AppRoot(viewModel: MainViewModel = viewModel()) {
                 onFinish = { viewModel.finishEditing(it) },
                 onEnsureEngine = { viewModel.ensureToneEngine(editingPhoto) },
                 onRenderFull = { viewModel.renderToneFullDisplay(editingPhoto) },
+                canUndo = editHistory.first, canRedo = editHistory.second,
+                onHistory = viewModel::stepEditHistory, onGesture = viewModel::editingGesture,
+                canPaste = canPasteEdits, onCopy = { viewModel.copyEdits(editingPhoto.uri) },
+                onPaste = { viewModel.pasteEdits(editingPhoto.uri) },
+                onReset = viewModel::resetEditorEdits,
             )
             !hasAnySource -> PermissionScreen(
                 onGrantLocal = { mediaPermissionLauncher.launch(requiredMediaPermissions()) },
@@ -221,7 +229,8 @@ fun AppRoot(viewModel: MainViewModel = viewModel()) {
                 onResetEdits = viewModel::resetEdits,
                 loadExif = { photo ->
                     withContext(Dispatchers.IO) {
-                        ExifReader.read(context, Uri.parse(photo.uri), photo.source)
+                        val type = PhotoFormatProbe.read(context, photo.uri, photo.sizeBytes, photo.lastModified)
+                        ExifReader.read(context, Uri.parse(photo.uri), type == PhotoFileType.CR3) ?: ExifInfo()
                     }
                 },
                 onEnsureDecoded = viewModel::ensureDecoded,
@@ -238,13 +247,16 @@ fun AppRoot(viewModel: MainViewModel = viewModel()) {
                 photoCount = photos.size,
                 gridState = gridState,
                 scanning = scanning,
-                scanFound = scanFound,
-                driveReadable = driveReadable,
                 onRefresh = viewModel::rescan,
                 onChangeDir = { treeLauncher.launch(null) },
                 onOpen = viewModel::openPhoto,
-                showCr3Only = showCr3Only,
-                onShowCr3Only = viewModel::setShowCr3Only,
+                localSource = gallerySource?.let { it == "local" } ?: hasMediaPermission,
+                directoryGranted = treeUri != null, directoryReadable = driveReadable,
+                onLocal = {
+                    if (hasMediaPermission) viewModel.selectGallerySource("local")
+                    else mediaPermissionLauncher.launch(requiredMediaPermissions())
+                },
+                onDirectory = { viewModel.selectGallerySource("external") },
                 selecting = selecting, selectedUris = selectedUris, deleting = deleting,
                 onBeginSelection = viewModel::enterSelection, onToggleSelection = viewModel::toggleSelection,
                 onDragSelection = viewModel::setSelectedPhotos,

@@ -65,8 +65,8 @@ android {
         applicationId = "com.dcimgallery.raw"
         minSdk = 26
         targetSdk = 34
-        versionCode = 47
-        versionName = "0.9.23"
+        versionCode = 54
+        versionName = "0.9.30"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField("boolean", "PRIVACY_POLICY_READY", policyReady.toString())
         buildConfigField("String", "PRIVACY_POLICY_VERSION", "\"$policyVersion\"")
